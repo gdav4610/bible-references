@@ -68,7 +68,9 @@ public final class KeywordMapper {
                             // verseNumber
                             e.getVerseEntity() == null ? null : e.getVerseEntity().getVerse(),
                             // verseText
-                            e.getVerseEntity() == null ? null : e.getVerseEntity().getText()
+                            e.getVerseEntity() == null ? null : e.getVerseEntity().getText(),
+                            // appearanceInVerse
+                            e.getAppearanceInVerse() == null ? null : e.getAppearanceInVerse()
                     );
 
                     return k;

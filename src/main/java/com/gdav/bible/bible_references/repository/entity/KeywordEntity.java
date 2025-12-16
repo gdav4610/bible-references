@@ -38,6 +38,9 @@ public class KeywordEntity {
     @Column(name = "strong_number")
     private String strongNumber; // 🔹 Nuevo campo
 
+    // Nuevo campo mapeado a la columna appearance_in_verse
+    @Column(name = "appearance_in_verse")
+    private Integer appearanceInVerse;
 
     // Relación inversa con el versículo
     @ManyToOne(fetch = FetchType.LAZY)

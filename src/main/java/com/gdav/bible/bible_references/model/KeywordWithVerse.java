@@ -17,4 +17,5 @@ public class KeywordWithVerse {
     private Integer chapter;
     private Integer verseNumber;
     private String verseText;
+    private Integer appearanceInVerse;
 }

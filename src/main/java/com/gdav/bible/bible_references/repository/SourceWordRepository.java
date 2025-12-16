@@ -29,7 +29,7 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
 
 
     @Query("SELECT k.translatedWord, COUNT(k) FROM SourceWordEntity s " +
-            "JOIN s.keywords k " +
+            "LEFT JOIN s.keywords k " +
             "WHERE s.idWord = :idWord " +
             "GROUP BY k.translatedWord " +
             "ORDER BY COUNT(k) DESC")
