@@ -9,14 +9,13 @@ import lombok.Setter;
 import java.util.List;
 
 
-
 @Entity
-@Table(name = "bible_source_words_catalog")
+@Table(name = "bible_compound_words_catalog")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class SourceWordEntity {
+public class CompoundWordEntity {
 
     @Id
     @Column(name = "id_word", nullable = false)
@@ -47,7 +46,9 @@ public class SourceWordEntity {
     @Column(name = "parent_sec_meaning")
     private String parentSecMeaning;
 
-    // Relación one-to-many hacia KeywordEntity (un registro de SourceWord puede corresponder a muchas palabras clave)
-    @OneToMany(mappedBy = "sourceWordEntity", fetch = FetchType.LAZY)
+    // Relación one-to-many hacia KeywordEntity (un registro de CompoundWord puede corresponder a muchas palabras clave)
+    @OneToMany(fetch = FetchType.LAZY)
+    @JoinColumn(name = "strong_number", referencedColumnName = "id_word", insertable = false, updatable = false)
     private List<KeywordEntity> keywords;
+
 }

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 @RestController
 @RequestMapping("/api/bible")
@@ -32,14 +33,20 @@ public class BibleController {
         //Consulta repositorio por id de la entidad
         List<VerseEntity> versesEntityList = repository.findAllByIdBookAndChapter( idBook, chapter );
 
-        // Mapear entidades a modelos incluyendo keywords usando KeywordMapper
-        List<Verse> versesList = versesEntityList.stream().map( verseEntity ->
-                new Verse(
-                        verseEntity.getVerse(),
-                        verseEntity.getText(),
-                        KeywordMapper.toKeywordList(verseEntity.getKeywords())
-                )
-        ).toList();
+        // Si no hay resultados, devolver lista vacía de versos
+        List<Verse> versesList;
+        if (versesEntityList == null || versesEntityList.isEmpty()) {
+            versesList = Collections.emptyList();
+        } else {
+            // Mapear entidades a modelos incluyendo keywords (KeywordMapper ahora incluye compoundWordEntity)
+            versesList = versesEntityList.stream().map( verseEntity ->
+                    new Verse(
+                            verseEntity.getVerse(),
+                            verseEntity.getText(),
+                            KeywordMapper.toKeywordList(verseEntity.getKeywords())
+                    )
+            ).toList();
+        }
 
         // 📘 Respuesta
         Map<String, Object> response = new HashMap<>();

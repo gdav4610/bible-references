@@ -56,4 +56,10 @@ public class KeywordEntity {
     @JoinColumn(name = "strong_number", referencedColumnName = "id_word", nullable = true, updatable = false, insertable = false)
     private SourceWordEntity sourceWordEntity;
 
+    // Relación many-to-one hacia la tabla bible_compound_words_catalog
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "strong_number", referencedColumnName = "id_word", nullable = true, updatable = false, insertable = false)
+    private CompoundWordEntity compoundWordEntity;
+
+    
 }

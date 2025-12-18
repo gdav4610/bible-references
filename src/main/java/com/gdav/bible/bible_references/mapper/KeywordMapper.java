@@ -31,6 +31,9 @@ public final class KeywordMapper {
                             e.getStrongNumber(),
                             null,
                             null,
+                            null,
+                            null,
+                            null,
                             null
                     );
 
@@ -38,6 +41,12 @@ public final class KeywordMapper {
                         k.setSourceTransliteration(e.getSourceWordEntity().getTransliteration());
                         k.setSourceInflection(e.getSourceWordEntity().getInflection());
                         k.setSourceMeaning(e.getSourceWordEntity().getMeaning());
+                    }
+
+                    if (e.getCompoundWordEntity() != null) {
+                        k.setCompoundTransliteration(e.getCompoundWordEntity().getTransliteration());
+                        k.setCompoundInflection(e.getCompoundWordEntity().getInflection());
+                        k.setCompoundMeaning(e.getCompoundWordEntity().getMeaning());
                     }
 
                     return k;
@@ -59,7 +68,7 @@ public final class KeywordMapper {
                 .map(e -> {
                     KeywordWithVerse k = new KeywordWithVerse(
                             e.getInflectionWord(),
-                            e.getTranslatedWord(),
+                            e.getTranslatedWord() == null ? "" : e.getTranslatedWord(),
                             e.getTransliteratedWord(),
                             // idBook
                             e.getVerseEntity() == null ? null : e.getVerseEntity().getIdBook(),

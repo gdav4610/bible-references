@@ -17,4 +17,9 @@ public class Keyword {
     private String sourceTransliteration;
     private String sourceInflection;
     private String sourceMeaning;
+
+    // Campos provenientes de bible_compound_words_catalog
+    private String compoundTransliteration;
+    private String compoundInflection;
+    private String compoundMeaning;
 }
