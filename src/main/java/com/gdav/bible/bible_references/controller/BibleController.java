@@ -26,12 +26,13 @@ public class BibleController {
 
 
     @GetMapping("/chapter/{idBook}/{chapter}")
-    public Map<String, Object> getChapter(@PathVariable int idBook, @PathVariable int chapter) {
+    public Map<String, Object> getChapter(@PathVariable int idBook, @PathVariable int chapter,
+                                          @RequestParam(required = false) Integer idVerse) {
 
         String bookName = getBookName(idBook);
 
         //Consulta repositorio por id de la entidad
-        List<VerseEntity> versesEntityList = repository.findAllByIdBookAndChapter( idBook, chapter );
+        List<VerseEntity> versesEntityList = repository.findAllByIdBookAndChapter( idBook, chapter, idVerse );
 
         // Si no hay resultados, devolver lista vacía de versos
         List<Verse> versesList;

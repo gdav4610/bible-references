@@ -16,6 +16,9 @@ public interface VerseRepository extends JpaRepository<VerseEntity, Integer> {
             "LEFT JOIN FETCH keywords.sourceWordEntity AS sourceWord " +
             "LEFT JOIN FETCH keywords.compoundWordEntity AS compoundWord " +
             "WHERE verse.idBible = 1 AND verse.idBook = :id_book AND verse.chapter = :chapter " +
+            "AND (:id_verse IS NULL OR verse.verse = :id_verse) " +
             "ORDER BY verse.chapter ASC, verse.verse ASC")
-    List<VerseEntity> findAllByIdBookAndChapter(@Param("id_book") Integer idBook, @Param("chapter") Integer chapter);
+    List<VerseEntity> findAllByIdBookAndChapter(@Param("id_book") Integer idBook,
+                                                @Param("chapter") Integer chapter,
+                                                @Param("id_verse") Integer idVerse);
 }

@@ -23,6 +23,12 @@ public class SourceWordWithKeywordStats {
     private String parentMeaning;
     // nuevo campo parentSecMeaning
     private String parentSecMeaning;
+    // nuevo campo firstAppBook
+    private Integer firstAppBook;
+    // nuevo campo firstAppChapter
+    private Integer firstAppChapter;
+    // nuevo campo firstAppVerse
+    private Integer firstAppVerse;
 
     private List<KeywordStats> keywordStats;
 }

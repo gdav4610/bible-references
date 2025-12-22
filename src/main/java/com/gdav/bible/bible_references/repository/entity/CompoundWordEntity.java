@@ -46,6 +46,19 @@ public class CompoundWordEntity {
     @Column(name = "parent_sec_meaning")
     private String parentSecMeaning;
 
+    // Nuevo campo first_app_book que almacena la primera aparición de la palabra
+    @Column(name = "first_app_book")
+    private Integer firstAppBook;
+
+    // Nuevo campo first_app_chapter que almacena la primera aparición de la palabra
+    @Column(name = "first_app_chapter")
+    private Integer firstAppChapter;
+
+    // Nuevo campo first_app_verse que almacena la primera aparición de la palabra
+    @Column(name = "first_app_verse")
+    private Integer firstAppVerse;
+
+
     // Relación one-to-many hacia KeywordEntity (un registro de CompoundWord puede corresponder a muchas palabras clave)
     @OneToMany(fetch = FetchType.LAZY)
     @JoinColumn(name = "strong_number", referencedColumnName = "id_word", insertable = false, updatable = false)

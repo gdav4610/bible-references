@@ -68,6 +68,9 @@ public class StrongController {
                     compound.getIdParentSec(),
                     compound.getParentMeaning(),
                     compound.getParentSecMeaning(),
+                    compound.getFirstAppBook(),
+                    compound.getFirstAppChapter(),
+                    compound.getFirstAppVerse(),
                     stats
             );
 
@@ -108,6 +111,9 @@ public class StrongController {
                 entity.getIdParentSec(),
                 entity.getParentMeaning(),
                 entity.getParentSecMeaning(),
+                entity.getFirstAppBook(),
+                entity.getFirstAppChapter(),
+                entity.getFirstAppVerse(),
                 stats
         );
 
