@@ -15,8 +15,9 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
             "LEFT JOIN FETCH s.keywords k " +
             "LEFT JOIN FETCH k.verseEntity v " +
             "WHERE s.idWord = :idWord " +
-            "ORDER BY v.idBook ASC, v.chapter ASC, v.verse ASC")
-    SourceWordEntity findByIdWordWithVerses(@Param("idWord") String idWord);
+            "AND k.source IN :sources " +
+            "ORDER BY v.id.idBook ASC, v.id.chapter ASC, v.id.verse ASC")
+    SourceWordEntity findByIdWordWithVerses(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
     @Query("SELECT DISTINCT s FROM SourceWordEntity s " +
@@ -24,14 +25,16 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
             "LEFT JOIN FETCH k.verseEntity v " +
             "WHERE s.idWord = :idWord " +
             "AND k.translatedWord = :translatedWord " +
-            "ORDER BY v.idBook ASC, v.chapter ASC, v.verse ASC")
-    SourceWordEntity findByIdWordAndTranslatedWordWithVerses(@Param("idWord") String idWord, @Param("translatedWord") String translatedWord);
+            "AND k.source IN :sources " +
+            "ORDER BY v.id.idBook ASC, v.id.chapter ASC, v.id.verse ASC")
+    SourceWordEntity findByIdWordAndTranslatedWordWithVerses(@Param("idWord") String idWord, @Param("translatedWord") String translatedWord, @Param("sources") List<String> sources);
 
 
     @Query("SELECT k.translatedWord, COUNT(k) FROM SourceWordEntity s " +
             "LEFT JOIN s.keywords k " +
             "WHERE s.idWord = :idWord " +
+            "AND k.source IN :sources " +
             "GROUP BY k.translatedWord " +
             "ORDER BY COUNT(k) DESC")
-    List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord);
+    List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 }

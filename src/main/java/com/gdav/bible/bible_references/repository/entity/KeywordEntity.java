@@ -17,6 +17,9 @@ public class KeywordEntity {
     @Column(name="id_word_reference",updatable=false,nullable=false)
     private Integer idWordReference;
 
+    @Column(name = "id_bible")
+    private Integer idBible; // nuevo campo para poder mapear la FK hacia VerseEntity
+
     @Column(name = "id_book")
     private Integer idBook;
 
@@ -42,12 +45,16 @@ public class KeywordEntity {
     @Column(name = "appearance_in_verse")
     private Integer appearanceInVerse;
 
+    @Column(name = "source")
+    private String source; // 🔹 Nuevo campo
+
     // Relación inversa con el versículo
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumns({
-            @JoinColumn(name = "id_book", referencedColumnName = "id_book", nullable=true, updatable=false,insertable=false),
-            @JoinColumn(name = "chapter", referencedColumnName = "chapter", nullable=true, updatable=false,insertable=false),
-            @JoinColumn(name = "verse", referencedColumnName = "verse", nullable=true, updatable=false,insertable=false)
+            @JoinColumn(name = "id_bible", referencedColumnName = "id_bible", nullable=true, updatable=false, insertable=false),
+            @JoinColumn(name = "id_book", referencedColumnName = "id_book", nullable=true, updatable=false, insertable=false),
+            @JoinColumn(name = "chapter", referencedColumnName = "chapter", nullable=true, updatable=false, insertable=false),
+            @JoinColumn(name = "verse", referencedColumnName = "verse", nullable=true, updatable=false, insertable=false)
     })
     private VerseEntity verseEntity;
 

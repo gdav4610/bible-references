@@ -34,12 +34,18 @@ public class StrongController {
 
 
     @GetMapping("/{strongCode}/stats")
-    public Object getStrongKeywordsGrouped(@PathVariable String strongCode) {
+    public Object getStrongKeywordsGrouped(@PathVariable String strongCode,
+                                           @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
         if (strongCode == null || strongCode.trim().isEmpty()) {
             return Map.of("error", "strongCode is required");
         }
+
+        boolean include = includeLXX != null && includeLXX;
+
+        // construir lista de fuentes acorde al flag includeLXX
+        List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
 
         String keyUpper = strongCode.toUpperCase();
 
@@ -50,7 +56,7 @@ public class StrongController {
                 return Map.of("error", "Compound strong code not found");
             }
 
-            List<Object[]> rows = compoundWordRepository.findKeywordCountsByIdWord(keyUpper);
+            List<Object[]> rows = compoundWordRepository.findKeywordCountsByIdWord(keyUpper, sources);
             List<KeywordStats> stats = new ArrayList<>();
             if (rows != null && !rows.isEmpty()) {
                 stats = rows.stream()
@@ -68,9 +74,9 @@ public class StrongController {
                     compound.getIdParentSec(),
                     compound.getParentMeaning(),
                     compound.getParentSecMeaning(),
-                    compound.getFirstAppBook(),
-                    compound.getFirstAppChapter(),
-                    compound.getFirstAppVerse(),
+                    include ? compound.getFirstAppBookLxx() : compound.getFirstAppBook(),
+                    include ? compound.getFirstAppChapterLxx() : compound.getFirstAppChapter(),
+                    include ? compound.getFirstAppVerseLxx() : compound.getFirstAppVerse(),
                     stats
             );
 
@@ -78,17 +84,17 @@ public class StrongController {
         }
 
         // Intentamos obtener la entidad con versos asociados
-        SourceWordEntity entity = sourceWordRepository.findByIdWordWithVerses(keyUpper);
+        SourceWordEntity entity = sourceWordRepository.findByIdWordWithVerses(keyUpper, sources);
         if (entity == null) {
             return Map.of("error", "Strong code not found");
         }
 
 
         // Usamos la consulta en la base de datos para agrupar por translatedWord
-        List<Object[]> rows = sourceWordRepository.findKeywordCountsByIdWord(keyUpper);
+        List<Object[]> rows = sourceWordRepository.findKeywordCountsByIdWord(keyUpper, sources);
         List<KeywordStats> stats = new ArrayList<>();
 
-        if (rows != null && !rows.isEmpty() && rows.getFirst() != null && rows.getFirst()[0] != null) {
+        if (rows != null && !rows.isEmpty() && rows.get(0) != null && rows.get(0)[0] != null) {
 
             stats = rows.stream()
                     .map(r -> {
@@ -111,9 +117,9 @@ public class StrongController {
                 entity.getIdParentSec(),
                 entity.getParentMeaning(),
                 entity.getParentSecMeaning(),
-                entity.getFirstAppBook(),
-                entity.getFirstAppChapter(),
-                entity.getFirstAppVerse(),
+                include ? entity.getFirstAppBookLxx() : entity.getFirstAppBook(),
+                include ? entity.getFirstAppChapterLxx() : entity.getFirstAppChapter(),
+                include ? entity.getFirstAppVerseLxx() : entity.getFirstAppVerse(),
                 stats
         );
 
@@ -122,18 +128,27 @@ public class StrongController {
 
 
     @GetMapping(value="/{strongCode}/details", params = "translatedWord")
-    public Object getStrongDetail(@PathVariable String strongCode, @RequestParam(name = "translatedWord", required = false) String translatedWord) {
+    public Object getStrongDetail(@PathVariable String strongCode,
+                                  @RequestParam(name = "translatedWord", required = false) String translatedWord,
+                                  @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
         if (strongCode == null || strongCode.trim().isEmpty()) {
             return Map.of("error", "strongCode is required");
         }
 
+        if (translatedWord == null || translatedWord.trim().isEmpty()) {
+            return Map.of("error", "translatedWord is required");
+        }
+
+        boolean include = includeLXX != null && includeLXX;
+        List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
+
         String keyUpper = strongCode.toUpperCase();
 
         // Si el codigo contiene espacio, usamos CompoundWordRepository con JOINs a keywords y verses
         if (strongCode.contains(" ")) {
-            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord);
+            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord, sources);
             if (compound == null) {
                 return Map.of("error", "Compound strong code not found");
             }
@@ -157,7 +172,7 @@ public class StrongController {
         }
 
         // Intentamos obtener la entidad con versos asociados (source words) y filtrando por translatedWord
-        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord);
+        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord, sources);
 
         if (entity == null) {
             return Map.of("error", "Not found");

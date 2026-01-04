@@ -19,14 +19,16 @@ public interface CompoundWordRepository extends JpaRepository<CompoundWordEntity
             "LEFT JOIN FETCH k.verseEntity v " +
             "WHERE c.idWord = :idWord " +
             "AND k.translatedWord = :translatedWord " +
-            "ORDER BY v.idBook ASC, v.chapter ASC, v.verse ASC")
-    CompoundWordEntity findByIdWordAndTranslatedWordWithVerses(@Param("idWord") String idWord, @Param("translatedWord") String translatedWord);
+            "AND k.source IN :sources " +
+            "ORDER BY v.id.idBook ASC, v.id.chapter ASC, v.id.verse ASC")
+    CompoundWordEntity findByIdWordAndTranslatedWordWithVerses(@Param("idWord") String idWord, @Param("translatedWord") String translatedWord, @Param("sources") List<String> sources);
 
 
     @Query("SELECT k.translatedWord, COUNT(k) FROM CompoundWordEntity c " +
             "LEFT JOIN KeywordEntity k ON c.idWord = k.strongNumber " +
             "WHERE c.idWord = :idWord " +
+            "AND k.source IN :sources " +
             "GROUP BY k.translatedWord " +
             "ORDER BY COUNT(k) DESC")
-    List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord);
+    List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 }

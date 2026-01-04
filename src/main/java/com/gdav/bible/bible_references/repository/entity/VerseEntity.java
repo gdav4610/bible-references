@@ -14,23 +14,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class VerseEntity {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name="id_verse",updatable=false,nullable=false)
-    private Integer idVerse;
-
-    @Column(name = "id_bible")
-    private Integer idBible;
-
-    // Número de libro (1 = Génesis, 2 = Éxodo, etc.)
-    @Column(name = "id_book")
-    private Integer idBook;
-
-    @Column(name = "chapter")
-    private Integer chapter;
-
-    @Column(name = "verse")
-    private Integer verse;
+    @EmbeddedId
+    private VerseId id;
 
     @Column(name = "text", columnDefinition = "TEXT")
     private String text;
@@ -38,11 +23,28 @@ public class VerseEntity {
     // Relación con palabras clave
     @OneToMany
     @JoinColumns({
+            @JoinColumn(name = "id_bible", referencedColumnName = "id_bible", nullable=true, updatable=false, insertable=false),
             @JoinColumn(name = "id_book", referencedColumnName = "id_book", nullable=true, updatable=false,insertable=false),
             @JoinColumn(name = "chapter", referencedColumnName = "chapter", nullable=true, updatable=false,insertable=false),
             @JoinColumn(name = "verse", referencedColumnName = "verse", nullable=true, updatable=false,insertable=false)
     })
     private List<KeywordEntity> keywords;
 
+    // Métodos de conveniencia para mantener compatibilidad con código existente
+    public Integer getIdBible() {
+        return id == null ? null : id.getIdBible();
+    }
+
+    public Integer getIdBook() {
+        return id == null ? null : id.getIdBook();
+    }
+
+    public Integer getChapter() {
+        return id == null ? null : id.getChapter();
+    }
+
+    public Integer getVerse() {
+        return id == null ? null : id.getVerse();
+    }
 
 }
