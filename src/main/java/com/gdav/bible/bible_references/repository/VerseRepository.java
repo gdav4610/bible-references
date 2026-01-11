@@ -6,12 +6,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.util.List;
 
 @Repository
 public interface VerseRepository extends JpaRepository<VerseEntity, VerseId> {
 
+    @Cacheable(value = "verses", key = "#root.methodName + '_' + #id_bible + '_' + #id_book + '_' + #chapter + '_' + #id_verse",
+            condition = "#idBible == 1 && #idBook == 1 && #chapter == 1 && #idVerse == null")
     @Query("SELECT DISTINCT verse FROM VerseEntity AS verse " +
             "LEFT JOIN FETCH verse.keywords AS keywords " +
             "LEFT JOIN FETCH keywords.sourceWordEntity AS sourceWord " +

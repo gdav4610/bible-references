@@ -1,0 +1,56 @@
+name: Build and Deploy to Azure Web App (ACR)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Build with Maven
+        run: mvn -B -DskipTests package
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ secrets.AZURE_ACR_NAME }}
+
+      - name: Build and push Docker image to ACR
+        run: |
+          IMAGE_NAME=${{ secrets.AZURE_ACR_LOGIN_SERVER }}/bible-references:${{ github.sha }}
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+
+      - name: Get ACR credentials
+        id: acrcreds
+        run: |
+          CREDS_JSON=$(az acr credential show --name ${{ secrets.AZURE_ACR_NAME }} -o json)
+          echo "username=$(echo $CREDS_JSON | jq -r .username)" >> $GITHUB_OUTPUT
+          echo "password=$(echo $CREDS_JSON | jq -r .passwords[0].value)" >> $GITHUB_OUTPUT
+
+      - name: Configure Web App to use the image from ACR
+        run: |
+          IMAGE_NAME=${{ secrets.AZURE_ACR_LOGIN_SERVER }}/bible-references:${{ github.sha }}
+          az webapp config container set --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RG }} --docker-custom-image-name $IMAGE_NAME --docker-registry-server-url https://${{ secrets.AZURE_ACR_LOGIN_SERVER }} --docker-registry-server-user ${{ steps.acrcreds.outputs.username }} --docker-registry-server-password ${{ steps.acrcreds.outputs.password }}
+
+      - name: Set WEBSITES_PORT app setting
+        run: |
+          az webapp config appsettings set --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RG }} --settings WEBSITES_PORT=8080
+
+      - name: Restart Web App
+        run: az webapp restart --name ${{ secrets.AZURE_WEBAPP_NAME }} --resource-group ${{ secrets.AZURE_RG }}
