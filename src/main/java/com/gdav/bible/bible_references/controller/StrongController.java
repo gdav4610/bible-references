@@ -6,12 +6,17 @@ import com.gdav.bible.bible_references.model.KeywordWithVerse;
 import com.gdav.bible.bible_references.model.SourceWord;
 import com.gdav.bible.bible_references.model.SourceWordWithKeywordStats;
 import com.gdav.bible.bible_references.repository.CompoundWordRepository;
+import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SourceWordRepository;
-import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
 import com.gdav.bible.bible_references.repository.entity.CompoundWordEntity;
+import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
+import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -25,11 +30,16 @@ public class StrongController {
 
     private final SourceWordRepository sourceWordRepository;
     private final CompoundWordRepository compoundWordRepository;
+    private final OutboxRepository outboxRepository;
+
+    // Logger
+    private static final Logger logger = LoggerFactory.getLogger(StrongController.class);
 
     @Autowired
-    public StrongController(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository) {
+    public StrongController(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository, OutboxRepository outboxRepository) {
         this.sourceWordRepository = sourceWordRepository;
         this.compoundWordRepository = compoundWordRepository;
+        this.outboxRepository = outboxRepository;
     }
 
 
@@ -42,10 +52,10 @@ public class StrongController {
             return Map.of("error", "strongCode is required");
         }
 
-        boolean include = includeLXX != null && includeLXX;
+        boolean includeLxx = includeLXX != null && includeLXX;
 
         // construir lista de fuentes acorde al flag includeLXX
-        List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
+        List<String> sources = includeLxx ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
 
         String keyUpper = strongCode.toUpperCase();
 
@@ -74,11 +84,21 @@ public class StrongController {
                     compound.getIdParentSec(),
                     compound.getParentMeaning(),
                     compound.getParentSecMeaning(),
-                    include ? compound.getFirstAppBookLxx() : compound.getFirstAppBook(),
-                    include ? compound.getFirstAppChapterLxx() : compound.getFirstAppChapter(),
-                    include ? compound.getFirstAppVerseLxx() : compound.getFirstAppVerse(),
+                    includeLxx ? compound.getFirstAppBookLxx() : compound.getFirstAppBook(),
+                    includeLxx ? compound.getFirstAppChapterLxx() : compound.getFirstAppChapter(),
+                    includeLxx ? compound.getFirstAppVerseLxx() : compound.getFirstAppVerse(),
                     stats
             );
+
+            // Outbox event: registrar el evento 'CompoundKeywordQueried'
+            try {
+                String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}",
+                        keyUpper, sources);
+                OutboxEventEntity event = new OutboxEventEntity("CompoundKeywordQueried", payload, LocalDateTime.now());
+                outboxRepository.save(event);
+            } catch (Exception ex) {
+                logger.error("Failed to persist outbox event for StrongKeywordsGrouped (compound)", ex);
+            }
 
             return model;
         }
@@ -117,11 +137,21 @@ public class StrongController {
                 entity.getIdParentSec(),
                 entity.getParentMeaning(),
                 entity.getParentSecMeaning(),
-                include ? entity.getFirstAppBookLxx() : entity.getFirstAppBook(),
-                include ? entity.getFirstAppChapterLxx() : entity.getFirstAppChapter(),
-                include ? entity.getFirstAppVerseLxx() : entity.getFirstAppVerse(),
+                includeLxx ? entity.getFirstAppBookLxx() : entity.getFirstAppBook(),
+                includeLxx ? entity.getFirstAppChapterLxx() : entity.getFirstAppChapter(),
+                includeLxx ? entity.getFirstAppVerseLxx() : entity.getFirstAppVerse(),
                 stats
         );
+
+        // Outbox event: registrar el evento 'KeywordQueried' para source word
+        try {
+            String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}",
+                    keyUpper, sources);
+            OutboxEventEntity event = new OutboxEventEntity("KeywordQueried", payload, LocalDateTime.now());
+            outboxRepository.save(event);
+        } catch (Exception ex) {
+            logger.error("Failed to persist outbox event for StrongKeywordsGrouped (source)", ex);
+        }
 
         return model;
     }

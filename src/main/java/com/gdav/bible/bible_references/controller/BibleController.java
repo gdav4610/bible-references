@@ -2,15 +2,20 @@ package com.gdav.bible.bible_references.controller;
 
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
 import com.gdav.bible.bible_references.model.Verse;
+import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.VerseRepository;
+import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Collections;
 
 @RestController
 @RequestMapping("/api/bible")
@@ -18,10 +23,15 @@ import java.util.Collections;
 public class BibleController {
 
     private final VerseRepository repository;
+    private final OutboxRepository outboxRepository;
+
+    // Logger
+    private static final Logger logger = LoggerFactory.getLogger(BibleController.class);
 
     @Autowired
-    BibleController(VerseRepository repository) {
+    BibleController(VerseRepository repository, OutboxRepository outboxRepository) {
         this.repository = repository;
+        this.outboxRepository = outboxRepository;
     }
 
 
@@ -58,6 +68,18 @@ public class BibleController {
         response.put("book", bookName);
         response.put("chapter", chapter);
         response.put("verses", versesList);
+
+        // Outbox event: registrar el evento 'ChapterQueried'
+        try {
+            String payload = String.format("{\"idBible\": %d, \"idBook\": %d, \"chapter\": %d, \"idVerse\": %s}",
+                    idBible, idBook, chapter, (idVerse != null ? idVerse.toString() : "null"));
+
+            OutboxEventEntity event = new OutboxEventEntity((idVerse == null ? "ChapterQueried": "VerseQueried"), payload, LocalDateTime.now());
+            outboxRepository.save(event);
+        } catch (Exception ex) {
+            // No bloquear la respuesta por errores del outbox; loggeamos si es necesario
+            logger.error("Failed to persist outbox event for ChapterQueried", ex);
+        }
 
         return response;
 
