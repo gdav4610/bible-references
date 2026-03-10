@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class KeywordStats {
+    private String transliteratedWord;
     private String translatedWord;
     private Integer count;
 }

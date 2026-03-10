@@ -70,7 +70,7 @@ public class StrongController {
             List<KeywordStats> stats = new ArrayList<>();
             if (rows != null && !rows.isEmpty()) {
                 stats = rows.stream()
-                        .map(r -> new KeywordStats(r[0] == null ? "" : r[0].toString(), r[1] == null ? 0 : ((Number) r[1]).intValue()))
+                        .map(r -> new KeywordStats(r[0] == null ? "" : r[0].toString(), null,  r[1] == null ? 0 : ((Number) r[1]).intValue()))
                         .sorted(Comparator.comparing(KeywordStats::getCount).reversed())
                         .collect(Collectors.toList());
             }
@@ -118,9 +118,9 @@ public class StrongController {
 
             stats = rows.stream()
                     .map(r -> {
-                        String translated = r[0] == null ? "" : r[0].toString();
+                        String transliterated = r[0] == null ? "" : r[0].toString();
                         Integer count = r[1] == null ? 0 : ((Number) r[1]).intValue();
-                        return new KeywordStats(translated, count);
+                        return new KeywordStats(transliterated, null, count);
                     })
                     .sorted(Comparator.comparing(KeywordStats::getCount).reversed())
                     .collect(Collectors.toList());
@@ -157,9 +157,9 @@ public class StrongController {
     }
 
 
-    @GetMapping(value="/{strongCode}/details", params = "translatedWord")
+    @GetMapping(value="/{strongCode}/details", params = "transliteratedWord")
     public Object getStrongDetail(@PathVariable String strongCode,
-                                  @RequestParam(name = "translatedWord", required = false) String translatedWord,
+                                  @RequestParam(name = "transliteratedWord", required = false) String transliteratedWord,
                                   @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
@@ -167,8 +167,8 @@ public class StrongController {
             return Map.of("error", "strongCode is required");
         }
 
-        if (translatedWord == null || translatedWord.trim().isEmpty()) {
-            return Map.of("error", "translatedWord is required");
+        if (transliteratedWord == null || transliteratedWord.trim().isEmpty()) {
+            return Map.of("error", "transliteratedWord is required");
         }
 
         boolean include = includeLXX != null && includeLXX;
@@ -178,7 +178,7 @@ public class StrongController {
 
         // Si el codigo contiene espacio, usamos CompoundWordRepository con JOINs a keywords y verses
         if (strongCode.contains(" ")) {
-            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord, sources);
+            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, sources);
             if (compound == null) {
                 return Map.of("error", "Compound strong code not found");
             }
@@ -202,7 +202,7 @@ public class StrongController {
         }
 
         // Intentamos obtener la entidad con versos asociados (source words) y filtrando por translatedWord
-        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTranslatedWordWithVerses(keyUpper, translatedWord, sources);
+        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, sources);
 
         if (entity == null) {
             return Map.of("error", "Not found");
