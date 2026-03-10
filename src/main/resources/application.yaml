@@ -15,4 +15,4 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
   cache:
     type: hazelcast
-    cache-names: verses
+    cache-names: verses, sourceWords, compoundWords, keywordCounts, compoundWordCounts

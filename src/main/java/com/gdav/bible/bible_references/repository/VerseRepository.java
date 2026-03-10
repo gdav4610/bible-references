@@ -13,8 +13,8 @@ import java.util.List;
 @Repository
 public interface VerseRepository extends JpaRepository<VerseEntity, VerseId> {
 
-    @Cacheable(value = "verses", key = "#root.methodName + '_' + #id_bible + '_' + #id_book + '_' + #chapter + '_' + #id_verse",
-            condition = "#idBible == 1 && #idBook == 1 && #chapter == 1 && #idVerse == null")
+    @Cacheable(value = "verses", key = "#root.methodName + '_' + #p0 + '_' + #p1 + '_' + #p2 + '_' + #p3",
+            condition = "@verseCacheCondition.shouldCacheVerse(#p0, #p1, #p2, #p3)")
     @Query("SELECT DISTINCT verse FROM VerseEntity AS verse " +
             "LEFT JOIN FETCH verse.keywords AS keywords " +
             "LEFT JOIN FETCH keywords.sourceWordEntity AS sourceWord " +

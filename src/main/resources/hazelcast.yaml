@@ -5,4 +5,4 @@ hazelcast:
         enabled: true
   map:
     verses:
-      time-to-live-seconds: 14400  # 4 hours
+      time-to-live-seconds: 86400  # 24 hours
