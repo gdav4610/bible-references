@@ -1,10 +1,7 @@
 package com.gdav.bible.bible_references.controller;
 
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
-import com.gdav.bible.bible_references.model.KeywordStats;
-import com.gdav.bible.bible_references.model.KeywordWithVerse;
-import com.gdav.bible.bible_references.model.SourceWord;
-import com.gdav.bible.bible_references.model.SourceWordWithKeywordStats;
+import com.gdav.bible.bible_references.model.*;
 import com.gdav.bible.bible_references.repository.CompoundWordRepository;
 import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SourceWordRepository;
@@ -59,18 +56,41 @@ public class StrongController {
 
         String keyUpper = strongCode.toUpperCase();
 
+
+        String firstKey = strongCode;
+        String secondKey = strongCode;
+        if(strongCode.contains(" ")){
+            firstKey = firstKey.split(" ")[0];
+            secondKey = secondKey.split(" ")[1];
+        }
+        List<CompoundWordEntity> compoundRelatedList = compoundWordRepository.findLikeIdWord(firstKey, secondKey, strongCode);
+        if (compoundRelatedList == null) {
+            return Map.of("error", "Compound strong code not found");
+        }
+
+
         // Si el codigo contiene espacio, usamos CompoundWordRepository
         if (strongCode.contains(" ")) {
+            String reversedStrongCode = secondKey + " " + firstKey;
             CompoundWordEntity compound = compoundWordRepository.findByIdWord(keyUpper);
             if (compound == null) {
                 return Map.of("error", "Compound strong code not found");
             }
 
-            List<Object[]> rows = compoundWordRepository.findKeywordCountsByIdWord(keyUpper, sources);
+            List<Object[]> rows = compoundWordRepository.findKeywordTransliteratedCountsByIdWord(keyUpper, sources, reversedStrongCode);
             List<KeywordStats> stats = new ArrayList<>();
             if (rows != null && !rows.isEmpty()) {
                 stats = rows.stream()
                         .map(r -> new KeywordStats(r[0] == null ? "" : r[0].toString(), null,  r[1] == null ? 0 : ((Number) r[1]).intValue()))
+                        .sorted(Comparator.comparing(KeywordStats::getCount).reversed())
+                        .collect(Collectors.toList());
+            }
+
+            List<Object[]> rowsT = compoundWordRepository.findKeywordTranslatedCountsByIdWord(keyUpper, sources, reversedStrongCode);
+            List<KeywordStats> statsT = new ArrayList<>();
+            if (rowsT != null && !rowsT.isEmpty()) {
+                statsT = rowsT.stream()
+                        .map(r -> new KeywordStats(null, r[0] == null ? "" : r[0].toString(),  r[1] == null ? 0 : ((Number) r[1]).intValue()))
                         .sorted(Comparator.comparing(KeywordStats::getCount).reversed())
                         .collect(Collectors.toList());
             }
@@ -87,7 +107,9 @@ public class StrongController {
                     includeLxx ? compound.getFirstAppBookLxx() : compound.getFirstAppBook(),
                     includeLxx ? compound.getFirstAppChapterLxx() : compound.getFirstAppChapter(),
                     includeLxx ? compound.getFirstAppVerseLxx() : compound.getFirstAppVerse(),
-                    stats
+                    stats,
+                    statsT,
+                    KeywordMapper.toCompoundWordList(compoundRelatedList)
             );
 
             // Outbox event: registrar el evento 'CompoundKeywordQueried'
@@ -128,6 +150,24 @@ public class StrongController {
         }
 
 
+        // Usamos la consulta en la base de datos para agrupar por translatedWord
+        List<Object[]> rowsT = sourceWordRepository.findKeywordTranslatedCountsByIdWord(keyUpper, sources);
+        List<KeywordStats> statsT = new ArrayList<>();
+
+        if (rowsT != null && !rowsT.isEmpty() && rowsT.get(0) != null && rowsT.get(0)[0] != null) {
+
+            statsT = rowsT.stream()
+                    .map(r -> {
+                        String translated = r[0] == null ? "" : r[0].toString();
+                        Integer count = r[1] == null ? 0 : ((Number) r[1]).intValue();
+                        return new KeywordStats(null, translated, count);
+                    })
+                    .sorted(Comparator.comparing(KeywordStats::getCount).reversed())
+                    .collect(Collectors.toList());
+
+        }
+
+
         SourceWordWithKeywordStats model = new SourceWordWithKeywordStats(
                 entity.getIdWord(),
                 entity.getTransliteration(),
@@ -140,7 +180,9 @@ public class StrongController {
                 includeLxx ? entity.getFirstAppBookLxx() : entity.getFirstAppBook(),
                 includeLxx ? entity.getFirstAppChapterLxx() : entity.getFirstAppChapter(),
                 includeLxx ? entity.getFirstAppVerseLxx() : entity.getFirstAppVerse(),
-                stats
+                stats,
+                statsT,
+                KeywordMapper.toCompoundWordList(compoundRelatedList)
         );
 
         // Outbox event: registrar el evento 'KeywordQueried' para source word
@@ -157,20 +199,21 @@ public class StrongController {
     }
 
 
-    @GetMapping(value="/{strongCode}/details", params = "transliteratedWord")
+    @GetMapping(value="/{strongCode}/details")
     public Object getStrongDetail(@PathVariable String strongCode,
                                   @RequestParam(name = "transliteratedWord", required = false) String transliteratedWord,
+                                  @RequestParam(name = "translatedWord", required = false) String translatedWord,
                                   @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
         if (strongCode == null || strongCode.trim().isEmpty()) {
             return Map.of("error", "strongCode is required");
         }
-
-        if (transliteratedWord == null || transliteratedWord.trim().isEmpty()) {
-            return Map.of("error", "transliteratedWord is required");
+/*
+        if ((transliteratedWord == null || transliteratedWord.trim().isEmpty()) && (translatedWord == null || translatedWord.trim().isEmpty())) {
+            return Map.of("error", "word is required");
         }
-
+*/
         boolean include = includeLXX != null && includeLXX;
         List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
 
@@ -178,7 +221,7 @@ public class StrongController {
 
         // Si el codigo contiene espacio, usamos CompoundWordRepository con JOINs a keywords y verses
         if (strongCode.contains(" ")) {
-            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, sources);
+            CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, translatedWord, sources);
             if (compound == null) {
                 return Map.of("error", "Compound strong code not found");
             }
@@ -202,7 +245,7 @@ public class StrongController {
         }
 
         // Intentamos obtener la entidad con versos asociados (source words) y filtrando por translatedWord
-        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, sources);
+        SourceWordEntity entity = sourceWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, translatedWord, sources);
 
         if (entity == null) {
             return Map.of("error", "Not found");

@@ -33,15 +33,27 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
             "ORDER BY COUNT(k) DESC")
     List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
+    @Cacheable(value = "keywordTranslatedCounts", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
+            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
+    @Query("SELECT k.translatedWord, COUNT(k) FROM SourceWordEntity s " +
+            "LEFT JOIN s.keywords k " +
+            "WHERE s.idWord = :idWord " +
+            "AND k.source IN :sources " +
+            "GROUP BY k.translatedWord " +
+            "ORDER BY COUNT(k) DESC")
+    List<Object[]> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
+
+    @Cacheable(value = "keywordTransliteratedWord", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
+            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT DISTINCT s FROM SourceWordEntity s " +
             "LEFT JOIN FETCH s.keywords k " +
             "LEFT JOIN FETCH k.verseEntity v " +
             "WHERE s.idWord = :idWord " +
-            "AND k.transliteratedWord = :transliteratedWord " +
+            "AND (k.transliteratedWord = :transliteratedWord OR k.translatedWord = :translatedWord )" +
             "AND k.source IN :sources " +
             "ORDER BY v.id.idBook ASC, v.id.chapter ASC, v.id.verse ASC")
-    SourceWordEntity findByIdWordAndTransliteratedWordWithVerses(@Param("idWord") String idWord, @Param("transliteratedWord") String transliteratedWord, @Param("sources") List<String> sources);
+    SourceWordEntity findByIdWordAndTransliteratedWordWithVerses(@Param("idWord") String idWord, @Param("transliteratedWord") String transliteratedWord, @Param("translatedWord") String translatedWord, @Param("sources") List<String> sources);
 
 
 }

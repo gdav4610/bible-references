@@ -2,6 +2,8 @@ package com.gdav.bible.bible_references.mapper;
 
 import com.gdav.bible.bible_references.model.Keyword;
 import com.gdav.bible.bible_references.model.KeywordWithVerse;
+import com.gdav.bible.bible_references.model.RelatedCompoundWord;
+import com.gdav.bible.bible_references.repository.entity.CompoundWordEntity;
 import com.gdav.bible.bible_references.repository.entity.KeywordEntity;
 
 import java.util.Collections;
@@ -87,5 +89,28 @@ public final class KeywordMapper {
                 .collect(Collectors.toList());
     }
 
+
+
+    /**
+     * Convierte una lista de entidades a la lista de modelos de dominio.
+     * Devuelve una lista vacía si la entrada es null o está vacía.
+     */
+    public static List<RelatedCompoundWord> toCompoundWordList(List<CompoundWordEntity> entities) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return entities.stream()
+                .map(e -> {
+                    RelatedCompoundWord k = new RelatedCompoundWord(
+                            e.getIdWord(),
+                            e.getTransliteration(),
+                            e.getMeaning()
+                    );
+
+                    return k;
+                })
+                .collect(Collectors.toList());
+    }
 
 }

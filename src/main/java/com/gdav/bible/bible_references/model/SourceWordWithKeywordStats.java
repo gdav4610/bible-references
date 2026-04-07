@@ -31,4 +31,8 @@ public class SourceWordWithKeywordStats {
     private Integer firstAppVerse;
 
     private List<KeywordStats> keywordStats;
+
+    private List<KeywordStats> keywordStatsTranslated;
+
+    private List<RelatedCompoundWord> compoundRelatedList;
 }
