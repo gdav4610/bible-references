@@ -31,7 +31,7 @@ public interface CompoundWordRepository extends JpaRepository<CompoundWordEntity
     List<Object[]> findKeywordTransliteratedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources, @Param("reversedStrongCode") String reversedStrongCode);
 
 
-    @Cacheable(value = "keywordTranslatedCounts", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
+    @Cacheable(value = "compoundTranslatedCounts", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
             condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT k.translatedWord, COUNT(k) FROM CompoundWordEntity c " +
             "LEFT JOIN KeywordEntity k ON c.idWord = k.strongNumber " +
@@ -42,7 +42,7 @@ public interface CompoundWordRepository extends JpaRepository<CompoundWordEntity
     List<Object[]> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources, @Param("reversedStrongCode") String reversedStrongCode);
 
 
-    @Cacheable(value = "keywordTransliteratedWord", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
+    @Cacheable(value = "compoundTransliteratedWord", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
             condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT c FROM CompoundWordEntity c " +
             "LEFT JOIN FETCH c.keywords k " +
