@@ -1,0 +1,55 @@
+{
+  "family": "bible-references-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::274869222183:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::274869222183:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "bible-references",
+      "image": "274869222183.dkr.ecr.mx-central-1.amazonaws.com/bible-references:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "SPRING_JPA_SHOW_SQL", "value": "false" },
+        { "name": "SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT", "value": "org.hibernate.dialect.PostgreSQLDialect" }
+      ],
+      "secrets": [
+        {
+          "name": "SPRING_DATASOURCE_URL",
+          "valueFrom": "arn:aws:secretsmanager:mx-central-1:274869222183:secret:bible-references/db-UcCWiR:url::"
+        },
+        {
+          "name": "SPRING_DATASOURCE_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:mx-central-1:274869222183:secret:bible-references/db-UcCWiR:username::"
+        },
+        {
+          "name": "SPRING_DATASOURCE_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:mx-central-1:274869222183:secret:bible-references/db-UcCWiR:password::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bible-references",
+          "awslogs-region": "mx-central-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

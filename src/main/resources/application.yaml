@@ -16,3 +16,12 @@ spring:
   cache:
     type: hazelcast
     cache-names: verses, sourceWords, compoundWords, keywordCounts, compoundWordCounts
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
