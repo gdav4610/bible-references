@@ -1,5 +1,6 @@
 package com.gdav.bible.bible_references.config;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,10 +26,20 @@ public class OriginValidationFilter extends OncePerRequestFilter {
     @Value("${app.frontend.origin:}")
     private String frontendOrigin;
 
+    private List<String> allowed;
+    private boolean allowAll = false;
+
+    @PostConstruct
+    public void init() {
+        allowed = Arrays.stream((frontendOrigin == null ? "" : frontendOrigin).split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+        allowAll = allowed.contains("*");
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        String origin = request.getHeader("X-Client-Origin");
-
         String uri = request.getRequestURI();
 
         // Excepción para el endpoint de health
@@ -37,23 +48,20 @@ public class OriginValidationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Ahora bloqueamos si no viene header Origin
+        String origin = request.getHeader("X-Client-Origin");
+
+        // Bloqueamos si no viene header Origin
         if (origin == null || origin.isBlank()) {
-            logger.warn("Request blocked: missing Origin header, path={}", request.getRequestURI());
+            logger.warn("Request blocked: missing Origin header, path={}", uri);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("Forbidden: missing Origin header");
             return;
         }
 
-        List<String> allowed = Arrays.stream(frontendOrigin.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
-
         // Si no hay orígenes configurados, rechazamos todas las peticiones con Origin (seguridad por defecto)
-        if (allowed.isEmpty()) {
-            logger.warn("Request blocked: no allowed origins configured, origin={}, path={}", origin, request.getRequestURI());
+        if (allowed == null || allowed.isEmpty()) {
+            logger.warn("Request blocked: no allowed origins configured, origin={}, path={}", origin, uri);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("Forbidden: no allowed origins configured");
@@ -61,14 +69,14 @@ public class OriginValidationFilter extends OncePerRequestFilter {
         }
 
         // Soporta comodín '*'
-        if (allowed.contains("*")) {
+        if (allowAll) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        boolean ok = allowed.contains(origin);
+        boolean ok = allowed.stream().anyMatch(a -> a.equalsIgnoreCase(origin));
         if (!ok) {
-            logger.warn("Request blocked: origin not allowed ({}), path={}", origin, request.getRequestURI());
+            logger.warn("Request blocked: origin not allowed ({}), path={}", origin, uri);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("text/plain;charset=UTF-8");
             response.getWriter().write("Forbidden origin: " + origin);
