@@ -29,6 +29,14 @@ public class OriginValidationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String origin = request.getHeader("X-Client-Origin");
 
+        String uri = request.getRequestURI();
+
+        // Excepción para el endpoint de health
+        if (uri != null && uri.startsWith("/actuator/health")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // Ahora bloqueamos si no viene header Origin
         if (origin == null || origin.isBlank()) {
             logger.warn("Request blocked: missing Origin header, path={}", request.getRequestURI());
