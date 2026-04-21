@@ -5,6 +5,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
@@ -13,12 +17,22 @@ public class CorsConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        String origin = (frontendOrigin == null || frontendOrigin.isBlank()) ? "*" : frontendOrigin;
+        List<String> allowed = Arrays.stream(frontendOrigin.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+
+        String[] origins;
+        if (allowed.isEmpty()) {
+            origins = new String[]{"*"};
+        } else {
+            origins = allowed.toArray(new String[0]);
+        }
+
         registry.addMapping("/api/**")
-                .allowedOrigins(origin)
+                .allowedOrigins(origins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(false);
     }
 }
-
