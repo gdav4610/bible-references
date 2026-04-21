@@ -17,6 +17,11 @@ spring:
     type: hazelcast
     cache-names: verses, sourceWords, compoundWords, keywordCounts, compoundWordCounts, keywordTranslatedCounts, compoundTranslatedCounts, keywordTransliteratedWord, compoundTransliteratedWord
 
+# Dominio del frontend (CloudFront). Reemplazar por su dominio, por ejemplo: https://d123.cloudfront.net
+app:
+  frontend:
+    origin: "https://escrituraclave.com"
+
 management:
   endpoints:
     web:

@@ -19,7 +19,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/bible")
-@CrossOrigin(origins = "*")
 public class BibleController {
 
     private final VerseRepository repository;

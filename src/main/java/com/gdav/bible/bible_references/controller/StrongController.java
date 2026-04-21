@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/strongs")
-@CrossOrigin(origins = "*")
 public class StrongController {
 
     private final SourceWordRepository sourceWordRepository;
