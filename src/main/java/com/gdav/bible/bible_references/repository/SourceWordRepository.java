@@ -40,7 +40,8 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
             "WHERE s.idWord = :idWord " +
             "AND k.source IN :sources " +
             "GROUP BY k.translatedWord " +
-            "ORDER BY COUNT(k) DESC")
+            "ORDER BY COUNT(k) DESC " +
+            "LIMIT 50")
     List<Object[]> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
