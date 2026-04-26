@@ -1,8 +1,11 @@
 package com.gdav.bible.bible_references.controller;
 
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
+import com.gdav.bible.bible_references.model.SearchResponse;
 import com.gdav.bible.bible_references.model.Verse;
+import com.gdav.bible.bible_references.repository.CompoundWordRepository;
 import com.gdav.bible.bible_references.repository.OutboxRepository;
+import com.gdav.bible.bible_references.repository.SourceWordRepository;
 import com.gdav.bible.bible_references.repository.VerseRepository;
 import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
@@ -23,14 +26,18 @@ public class BibleController {
 
     private final VerseRepository repository;
     private final OutboxRepository outboxRepository;
+    private final SourceWordRepository sourceWordRepository;
+    private final CompoundWordRepository compoundWordRepository;
 
     // Logger
     private static final Logger logger = LoggerFactory.getLogger(BibleController.class);
 
     @Autowired
-    BibleController(VerseRepository repository, OutboxRepository outboxRepository) {
+    BibleController(VerseRepository repository, OutboxRepository outboxRepository, SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository) {
         this.repository = repository;
         this.outboxRepository = outboxRepository;
+        this.sourceWordRepository = sourceWordRepository;
+        this.compoundWordRepository = compoundWordRepository;
     }
 
 
@@ -83,6 +90,58 @@ public class BibleController {
         return response;
 
     }
+
+
+
+
+    @GetMapping(value="/search")
+    public Object getStrongDetail(
+                                  @RequestParam(name = "q", required = false) String q,
+                                  @RequestParam(name = "includeLXX", required = false) Boolean includeLxx) {
+
+        // determinar idBible según includeLxx (true => 2, false/absent => 1)
+        int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
+
+        //Consulta repositorio por id de la entidad
+        List<VerseEntity> versesEntityList = repository.findAllByWord(idBible, q );
+
+        // Si no hay resultados, devolver lista vacía de versos
+        List<SearchResponse> versesList;
+        if (versesEntityList == null || versesEntityList.isEmpty()) {
+            versesList = Collections.emptyList();
+        } else {
+            // Mapear entidades a modelos incluyendo keywords (KeywordMapper ahora incluye compoundWordEntity)
+            versesList = versesEntityList.stream().map( verseEntity ->
+                    new SearchResponse(
+                            verseEntity.getIdBook(),
+                            verseEntity.getChapter(),
+                            verseEntity.getVerse(),
+                            verseEntity.getText(),
+                            KeywordMapper.toKeywordList(verseEntity.getKeywords())
+                    )
+            ).toList();
+        }
+
+        // 📘 Respuesta
+        Map<String, Object> response = new HashMap<>();
+        response.put("verses", versesList);
+/*
+        // Outbox event: registrar el evento 'ChapterQueried'
+        try {
+            String payload = String.format("{\"idBible\": %d, \"idBook\": %d, \"chapter\": %d, \"idVerse\": %s}",
+                    idBible, idBook, chapter, (idVerse != null ? idVerse.toString() : "null"));
+
+            OutboxEventEntity event = new OutboxEventEntity((idVerse == null ? "ChapterQueried": "VerseQueried"), payload, LocalDateTime.now());
+            outboxRepository.save(event);
+        } catch (Exception ex) {
+            // No bloquear la respuesta por errores del outbox; loggeamos si es necesario
+            logger.error("Failed to persist outbox event for ChapterQueried", ex);
+        }
+*/
+        return response;
+
+    }
+
 
 
     // 🔤 Mapeo simple de ID → Nombre del libro

@@ -26,4 +26,14 @@ public interface VerseRepository extends JpaRepository<VerseEntity, VerseId> {
                                                 @Param("id_book") Integer idBook,
                                                 @Param("chapter") Integer chapter,
                                                 @Param("id_verse") Integer idVerse);
+
+    @Query("SELECT DISTINCT verse FROM VerseEntity AS verse " +
+            "LEFT JOIN FETCH verse.keywords AS keywords " +
+            "LEFT JOIN FETCH keywords.sourceWordEntity AS sourceWord " +
+            "LEFT JOIN FETCH keywords.compoundWordEntity AS compoundWord " +
+            "WHERE verse.id.idBible = :id_bible " +
+            "AND keywords.translatedWord ILIKE %:translatedWord%  " +
+            "ORDER BY verse.id.idBook ASC, verse.id.chapter ASC, verse.id.verse ASC, keywords.appearanceInVerse ASC")
+    List<VerseEntity> findAllByWord(@Param("id_bible") Integer idBible, @Param("translatedWord") String translatedWord);
+
 }
