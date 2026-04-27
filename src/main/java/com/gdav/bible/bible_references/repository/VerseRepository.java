@@ -2,11 +2,11 @@ package com.gdav.bible.bible_references.repository;
 
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseId;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.cache.annotation.Cacheable;
 
 import java.util.List;
 
@@ -27,13 +27,5 @@ public interface VerseRepository extends JpaRepository<VerseEntity, VerseId> {
                                                 @Param("chapter") Integer chapter,
                                                 @Param("id_verse") Integer idVerse);
 
-    @Query("SELECT DISTINCT verse FROM VerseEntity AS verse " +
-            "LEFT JOIN FETCH verse.keywords AS keywords " +
-            "LEFT JOIN FETCH keywords.sourceWordEntity AS sourceWord " +
-            "LEFT JOIN FETCH keywords.compoundWordEntity AS compoundWord " +
-            "WHERE verse.id.idBible = :id_bible " +
-            "AND keywords.translatedWord ILIKE %:translatedWord%  " +
-            "ORDER BY verse.id.idBook ASC, verse.id.chapter ASC, verse.id.verse ASC, keywords.appearanceInVerse ASC")
-    List<VerseEntity> findAllByWord(@Param("id_bible") Integer idBible, @Param("translatedWord") String translatedWord);
 
 }

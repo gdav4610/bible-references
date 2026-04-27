@@ -1,12 +1,10 @@
 package com.gdav.bible.bible_references.controller;
 
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
+import com.gdav.bible.bible_references.model.Keyword;
 import com.gdav.bible.bible_references.model.SearchResponse;
 import com.gdav.bible.bible_references.model.Verse;
-import com.gdav.bible.bible_references.repository.CompoundWordRepository;
-import com.gdav.bible.bible_references.repository.OutboxRepository;
-import com.gdav.bible.bible_references.repository.SourceWordRepository;
-import com.gdav.bible.bible_references.repository.VerseRepository;
+import com.gdav.bible.bible_references.repository.*;
 import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
 import org.slf4j.Logger;
@@ -17,8 +15,10 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/bible")
@@ -26,18 +26,16 @@ public class BibleController {
 
     private final VerseRepository repository;
     private final OutboxRepository outboxRepository;
-    private final SourceWordRepository sourceWordRepository;
-    private final CompoundWordRepository compoundWordRepository;
+    private final SearchRepository searchRepository;
 
     // Logger
     private static final Logger logger = LoggerFactory.getLogger(BibleController.class);
 
     @Autowired
-    BibleController(VerseRepository repository, OutboxRepository outboxRepository, SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository) {
+    BibleController(VerseRepository repository, OutboxRepository outboxRepository, SearchRepository searchRepository) {
         this.repository = repository;
         this.outboxRepository = outboxRepository;
-        this.sourceWordRepository = sourceWordRepository;
-        this.compoundWordRepository = compoundWordRepository;
+        this.searchRepository = searchRepository;
     }
 
 
@@ -102,24 +100,44 @@ public class BibleController {
         // determinar idBible según includeLxx (true => 2, false/absent => 1)
         int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
 
+        String qq = "\\m"+q;
         //Consulta repositorio por id de la entidad
-        List<VerseEntity> versesEntityList = repository.findAllByWord(idBible, q );
+        List<SearchProjection> projectionList = searchRepository.findAllByWord(idBible, qq );
 
         // Si no hay resultados, devolver lista vacía de versos
         List<SearchResponse> versesList;
-        if (versesEntityList == null || versesEntityList.isEmpty()) {
+        if (projectionList == null || projectionList.isEmpty()) {
             versesList = Collections.emptyList();
         } else {
-            // Mapear entidades a modelos incluyendo keywords (KeywordMapper ahora incluye compoundWordEntity)
-            versesList = versesEntityList.stream().map( verseEntity ->
-                    new SearchResponse(
-                            verseEntity.getIdBook(),
-                            verseEntity.getChapter(),
-                            verseEntity.getVerse(),
-                            verseEntity.getText(),
-                            KeywordMapper.toKeywordList(verseEntity.getKeywords())
-                    )
-            ).toList();
+            // Agrupar por verso (idBook, chapter, verse) y construir SearchResponse
+            // Usar LinkedHashMap para preservar el orden de aparición
+            Map<String, List<SearchProjection>> grouped = projectionList.stream()
+                    .collect(Collectors.groupingBy(
+                            p -> p.getIdBook() + "_" + p.getChapter() + "_" + p.getVerse(),
+                            LinkedHashMap::new,
+                            Collectors.toList()
+                    ));
+
+            versesList = grouped.values().stream().map(list -> {
+                SearchProjection first = list.get(0);
+
+                List<com.gdav.bible.bible_references.model.Keyword> keywords = list.stream().map(p -> {
+                    Keyword k = new Keyword();
+                    k.setInflectionWord(p.getInflectionWord());
+                    k.setTranslatedWord(p.getTranslatedWord());
+                    k.setTransliteratedWord(p.getTransliteratedWord());
+                    k.setStrongNumber(p.getStrongNumber());
+                    return k;
+                }).collect(Collectors.toList());
+
+                return new SearchResponse(
+                        first.getIdBook(),
+                        first.getChapter(),
+                        first.getVerse(),
+                        first.getText(),
+                        keywords
+                );
+            }).collect(Collectors.toList());
         }
 
         // 📘 Respuesta

@@ -39,13 +39,13 @@ public final class KeywordMapper {
                             null
                     );
 
-                    if (e.getSourceWordEntity() != null) {
+                    if (e.getSourceWordEntity() != null && e.getSourceWordEntity().getTransliteration() != null) {
                         k.setSourceTransliteration(e.getSourceWordEntity().getTransliteration());
                         k.setSourceInflection(e.getSourceWordEntity().getInflection());
                         k.setSourceMeaning(e.getSourceWordEntity().getMeaning());
                     }
 
-                    if (e.getCompoundWordEntity() != null) {
+                    if (e.getCompoundWordEntity() != null && e.getCompoundWordEntity().getTransliteration() != null) {
                         k.setCompoundTransliteration(e.getCompoundWordEntity().getTransliteration());
                         k.setCompoundInflection(e.getCompoundWordEntity().getInflection());
                         k.setCompoundMeaning(e.getCompoundWordEntity().getMeaning());
@@ -56,6 +56,34 @@ public final class KeywordMapper {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Convierte una lista de entidades a la lista de modelos de dominio.
+     * Devuelve una lista vacía si la entrada es null o está vacía.
+     */
+    public static List<Keyword> toSimpleKeywordList(List<KeywordEntity> entities) {
+        if (Objects.isNull(entities) || entities.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return entities.stream()
+                .map(e -> {
+                    Keyword k = new Keyword(
+                            e.getInflectionWord(),
+                            e.getTranslatedWord(),
+                            e.getTransliteratedWord(),
+                            e.getStrongNumber(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null
+                    );
+
+                    return k;
+                })
+                .collect(Collectors.toList());
+    }
 
     /**
      * Convierte una lista de entidades a la lista de modelos de dominio.
