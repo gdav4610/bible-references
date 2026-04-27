@@ -26,7 +26,7 @@ public interface SearchRepository extends JpaRepository<VerseEntity, VerseId> {
             "FROM bible_schema.bible_verses AS verse " +
             "LEFT JOIN bible_schema.bible_word_references AS keywords ON verse.id_bible = keywords.id_bible AND verse.id_book = keywords.id_book  AND verse.chapter = keywords.chapter  AND verse.verse = keywords.verse " +
             "WHERE verse.id_bible = :id_bible AND public.unaccent(verse.text) ~* public.unaccent(:translatedWord) " +
-            "AND (keywords.translated_word IS NULL OR public.unaccent(keywords.translated_word) ~* public.unaccent(:translatedWord)  ) " +
+//            "AND (keywords.translated_word IS NULL OR public.unaccent(keywords.translated_word) ~* public.unaccent(:translatedWord)  ) " +
             "ORDER BY verse.id_book ASC, verse.chapter ASC, verse.verse ASC, keywords.appearance_in_verse ASC", nativeQuery = true)
     List<SearchProjection> findAllByWord(@Param("id_bible") Integer idBible, @Param("translatedWord") String translatedWord);
 
