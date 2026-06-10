@@ -11,13 +11,14 @@ import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -40,12 +41,12 @@ public class StrongController {
 
 
     @GetMapping("/{strongCode}/stats")
-    public Object getStrongKeywordsGrouped(@PathVariable String strongCode,
-                                           @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
+    public ResponseEntity<SourceWordWithKeywordStatsResponse> getStrongKeywordsGrouped(@PathVariable String strongCode,
+                                                                           @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
         if (strongCode == null || strongCode.trim().isEmpty()) {
-            return Map.of("error", "strongCode is required");
+           // return Map.of("error", "strongCode is required");
         }
 
         boolean includeLxx = includeLXX != null && includeLXX;
@@ -64,7 +65,7 @@ public class StrongController {
         }
         List<CompoundWordEntity> compoundRelatedList = compoundWordRepository.findLikeIdWord(firstKey, secondKey, strongCode);
         if (compoundRelatedList == null) {
-            return Map.of("error", "Compound strong code not found");
+           // return Map.of("error", "Compound strong code not found");
         }
 
 
@@ -73,7 +74,7 @@ public class StrongController {
             String reversedStrongCode = secondKey + " " + firstKey;
             CompoundWordEntity compound = compoundWordRepository.findByIdWord(keyUpper);
             if (compound == null) {
-                return Map.of("error", "Compound strong code not found");
+               // return Map.of("error", "Compound strong code not found");
             }
 
             List<Object[]> rows = compoundWordRepository.findKeywordTransliteratedCountsByIdWord(keyUpper, sources, reversedStrongCode);
@@ -94,7 +95,7 @@ public class StrongController {
                         .collect(Collectors.toList());
             }
 
-            SourceWordWithKeywordStats model = new SourceWordWithKeywordStats(
+            SourceWordWithKeywordStatsResponse model = new SourceWordWithKeywordStatsResponse(
                     compound.getIdWord(),
                     compound.getTransliteration(),
                     compound.getInflection(),
@@ -121,13 +122,13 @@ public class StrongController {
                 logger.error("Failed to persist outbox event for StrongKeywordsGrouped (compound)", ex);
             }
 
-            return model;
+            return new ResponseEntity<>(model, HttpStatus.OK);
         }
 
         // Intentamos obtener la entidad con versos asociados
         SourceWordEntity entity = sourceWordRepository.findByIdWordWithVerses(keyUpper, sources);
         if (entity == null) {
-            return Map.of("error", "Strong code not found");
+           // return Map.of("error", "Strong code not found");
         }
 
 
@@ -167,7 +168,7 @@ public class StrongController {
         }
 
 
-        SourceWordWithKeywordStats model = new SourceWordWithKeywordStats(
+        SourceWordWithKeywordStatsResponse model = new SourceWordWithKeywordStatsResponse(
                 entity.getIdWord(),
                 entity.getTransliteration(),
                 entity.getInflection(),
@@ -194,19 +195,19 @@ public class StrongController {
             logger.error("Failed to persist outbox event for StrongKeywordsGrouped (source)", ex);
         }
 
-        return model;
+        return new ResponseEntity<>(model, HttpStatus.OK);
     }
 
 
     @GetMapping(value="/{strongCode}/details")
-    public Object getStrongDetail(@PathVariable String strongCode,
+    public ResponseEntity<SourceWordResponse>  getStrongDetail(@PathVariable String strongCode,
                                   @RequestParam(name = "transliteratedWord", required = false) String transliteratedWord,
                                   @RequestParam(name = "translatedWord", required = false) String translatedWord,
                                   @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
 
         // Validaciones tempranas
         if (strongCode == null || strongCode.trim().isEmpty()) {
-            return Map.of("error", "strongCode is required");
+           // return Map.of("error", "strongCode is required");
         }
 /*
         if ((transliteratedWord == null || transliteratedWord.trim().isEmpty()) && (translatedWord == null || translatedWord.trim().isEmpty())) {
@@ -222,13 +223,13 @@ public class StrongController {
         if (strongCode.contains(" ")) {
             CompoundWordEntity compound = compoundWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, translatedWord, sources);
             if (compound == null) {
-                return Map.of("error", "Compound strong code not found");
+              //  return Map.of("error", "Compound strong code not found");
             }
 
             // Mapear keywords del compound word a DTOs
             List<KeywordWithVerse> sourceKeywordsWithVerse = KeywordMapper.toKeywordWithVerseList(compound.getKeywords());
 
-            SourceWord model = new SourceWord(
+            SourceWordResponse model = new SourceWordResponse(
                     compound.getIdWord(),
                     compound.getTransliteration(),
                     compound.getInflection(),
@@ -240,20 +241,20 @@ public class StrongController {
                     sourceKeywordsWithVerse
             );
 
-            return model;
+            return new ResponseEntity<>(model, HttpStatus.OK);
         }
 
         // Intentamos obtener la entidad con versos asociados (source words) y filtrando por translatedWord
         SourceWordEntity entity = sourceWordRepository.findByIdWordAndTransliteratedWordWithVerses(keyUpper, transliteratedWord, translatedWord, sources);
 
         if (entity == null) {
-            return Map.of("error", "Not found");
+          //  return Map.of("error", "Not found");
         }
 
         // Mapear keywords del source word a DTOs
         List<KeywordWithVerse> sourceKeywordsWithVerse = KeywordMapper.toKeywordWithVerseList(entity.getKeywords());
 
-        SourceWord model = new SourceWord(
+        SourceWordResponse model = new SourceWordResponse(
                 entity.getIdWord(),
                 entity.getTransliteration(),
                 entity.getInflection(),
@@ -265,7 +266,7 @@ public class StrongController {
                 sourceKeywordsWithVerse
         );
 
-        return model;
+        return new ResponseEntity<>(model, HttpStatus.OK);
     }
 
 
