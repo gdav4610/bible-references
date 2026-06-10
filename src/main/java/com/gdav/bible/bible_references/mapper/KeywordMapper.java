@@ -26,32 +26,38 @@ public final class KeywordMapper {
 
         return entities.stream()
                 .map(e -> {
-                    Keyword k = new Keyword(
+                    String sourceTransliteration = null;
+                    String sourceInflection = null;
+                    String sourceMeaning = null;
+
+                    if (e.getSourceWordEntity() != null && e.getSourceWordEntity().getTransliteration() != null) {
+                        sourceTransliteration = e.getSourceWordEntity().getTransliteration();
+                        sourceInflection = e.getSourceWordEntity().getInflection();
+                        sourceMeaning = e.getSourceWordEntity().getMeaning();
+                    }
+
+                    String compoundTransliteration = null;
+                    String compoundInflection = null;
+                    String compoundMeaning = null;
+
+                    if (e.getCompoundWordEntity() != null && e.getCompoundWordEntity().getTransliteration() != null) {
+                        compoundTransliteration = e.getCompoundWordEntity().getTransliteration();
+                        compoundInflection = e.getCompoundWordEntity().getInflection();
+                        compoundMeaning = e.getCompoundWordEntity().getMeaning();
+                    }
+
+                    return new Keyword(
                             e.getInflectionWord(),
                             e.getTranslatedWord(),
                             e.getTransliteratedWord(),
                             e.getStrongNumber(),
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null
+                            sourceTransliteration,
+                            sourceInflection,
+                            sourceMeaning,
+                            compoundTransliteration,
+                            compoundInflection,
+                            compoundMeaning
                     );
-
-                    if (e.getSourceWordEntity() != null && e.getSourceWordEntity().getTransliteration() != null) {
-                        k.setSourceTransliteration(e.getSourceWordEntity().getTransliteration());
-                        k.setSourceInflection(e.getSourceWordEntity().getInflection());
-                        k.setSourceMeaning(e.getSourceWordEntity().getMeaning());
-                    }
-
-                    if (e.getCompoundWordEntity() != null && e.getCompoundWordEntity().getTransliteration() != null) {
-                        k.setCompoundTransliteration(e.getCompoundWordEntity().getTransliteration());
-                        k.setCompoundInflection(e.getCompoundWordEntity().getInflection());
-                        k.setCompoundMeaning(e.getCompoundWordEntity().getMeaning());
-                    }
-
-                    return k;
                 })
                 .collect(Collectors.toList());
     }
@@ -66,22 +72,18 @@ public final class KeywordMapper {
         }
 
         return entities.stream()
-                .map(e -> {
-                    Keyword k = new Keyword(
-                            e.getInflectionWord(),
-                            e.getTranslatedWord(),
-                            e.getTransliteratedWord(),
-                            e.getStrongNumber(),
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null
-                    );
-
-                    return k;
-                })
+                .map(e -> new Keyword(
+                        e.getInflectionWord(),
+                        e.getTranslatedWord(),
+                        e.getTransliteratedWord(),
+                        e.getStrongNumber(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                ))
                 .collect(Collectors.toList());
     }
 
