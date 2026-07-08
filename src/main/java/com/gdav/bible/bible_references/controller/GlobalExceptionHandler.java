@@ -38,6 +38,7 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleGeneral(Exception ex) {
         logger.error("Unhandled error", ex);
@@ -50,4 +51,3 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
-
