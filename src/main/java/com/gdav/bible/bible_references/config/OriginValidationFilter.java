@@ -42,8 +42,8 @@ public class OriginValidationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String uri = request.getRequestURI();
 
-        // Excepción para el endpoint de health
-        if (uri != null && uri.startsWith("/actuator/health")) {
+        // Excepción para el endpoint de health y para la documentación OpenAPI/Swagger
+        if (uri != null && (uri.startsWith("/actuator/health") || isDocsPath(uri))) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -74,6 +74,7 @@ public class OriginValidationFilter extends OncePerRequestFilter {
             return;
         }
 
+
         boolean ok = allowed.stream().anyMatch(a -> a.equalsIgnoreCase(origin));
         if (!ok) {
             logger.warn("Request blocked: origin not allowed ({}), path={}", origin, uri);
@@ -84,5 +85,13 @@ public class OriginValidationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    // La UI de Swagger y el JSON de OpenAPI deben ser accesibles desde el navegador,
+    // que no envía el header X-Client-Origin.
+    private boolean isDocsPath(String uri) {
+        return uri.startsWith("/swagger-ui")
+                || uri.startsWith("/v3/api-docs")
+                || uri.equals("/swagger-ui.html");
     }
 }

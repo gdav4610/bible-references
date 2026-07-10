@@ -1,40 +1,40 @@
 package com.gdav.bible.bible_references.service;
 
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
+import com.gdav.bible.bible_references.model.ChapterResponse;
 import com.gdav.bible.bible_references.model.Keyword;
 import com.gdav.bible.bible_references.model.SearchResponse;
+import com.gdav.bible.bible_references.model.SearchResultResponse;
 import com.gdav.bible.bible_references.model.Verse;
-import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SearchProjection;
 import com.gdav.bible.bible_references.repository.SearchRepository;
 import com.gdav.bible.bible_references.repository.VerseRepository;
-import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-public class BibleService {
+public class BibleService implements IBibleService {
 
     private final VerseRepository repository;
-    private final OutboxRepository outboxRepository;
+    private final OutboxRecorder outboxRecorder;
     private final SearchRepository searchRepository;
     private static final Logger logger = LoggerFactory.getLogger(BibleService.class);
 
-    public BibleService(VerseRepository repository, OutboxRepository outboxRepository, SearchRepository searchRepository) {
+    public BibleService(VerseRepository repository, OutboxRecorder outboxRecorder, SearchRepository searchRepository) {
         this.repository = repository;
-        this.outboxRepository = outboxRepository;
+        this.outboxRecorder = outboxRecorder;
         this.searchRepository = searchRepository;
     }
 
+    @Override
     @Transactional(readOnly = true)
-    public Map<String, Object> getChapter(int idBook, int chapter, Integer idVerse, Boolean includeLxx) {
+    public ChapterResponse getChapter(int idBook, int chapter, Integer idVerse, Boolean includeLxx) {
         String bookName = getBookName(idBook);
         int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
 
@@ -53,26 +53,21 @@ public class BibleService {
             ).toList();
         }
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("book", bookName);
-        response.put("chapter", chapter);
-        response.put("verses", versesList);
-
         try {
             String payload = String.format("{\"idBible\": %d, \"idBook\": %d, \"chapter\": %d, \"idVerse\": %s}",
                     idBible, idBook, chapter, (idVerse != null ? idVerse.toString() : "null"));
 
-            OutboxEventEntity event = new OutboxEventEntity((idVerse == null ? "ChapterQueried": "VerseQueried"), payload, LocalDateTime.now());
-            outboxRepository.save(event);
+            outboxRecorder.record(idVerse == null ? "ChapterQueried" : "VerseQueried", payload);
         } catch (Exception ex) {
             logger.error("Failed to persist outbox event for ChapterQueried", ex);
         }
 
-        return response;
+        return new ChapterResponse(bookName, chapter, versesList);
     }
 
+    @Override
     @Transactional(readOnly = true)
-    public Map<String, Object> search(String q, Boolean includeLxx) {
+    public SearchResultResponse search(String q, Boolean includeLxx) {
         int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
         String qq = "\\m" + q;
         List<SearchProjection> projectionList = searchRepository.findAllByWord(idBible, qq );
@@ -105,9 +100,7 @@ public class BibleService {
             }).collect(Collectors.toList());
         }
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("verses", versesList);
-        return response;
+        return new SearchResultResponse(versesList);
     }
 
     // Copiar método getBookName del controller (puede moverse a util común)

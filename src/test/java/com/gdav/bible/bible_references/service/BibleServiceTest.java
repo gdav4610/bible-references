@@ -3,17 +3,13 @@ package com.gdav.bible.bible_references.service;
 import com.gdav.bible.bible_references.model.Keyword;
 import com.gdav.bible.bible_references.model.SearchResponse;
 import com.gdav.bible.bible_references.model.Verse;
-import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SearchProjection;
 import com.gdav.bible.bible_references.repository.SearchRepository;
 import com.gdav.bible.bible_references.repository.VerseRepository;
-import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
 import com.gdav.bible.bible_references.repository.entity.VerseId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,7 +27,7 @@ class BibleServiceTest {
     private VerseRepository verseRepository;
 
     @Mock
-    private OutboxRepository outboxRepository;
+    private OutboxRecorder outboxRecorder;
 
     @Mock
     private SearchRepository searchRepository;
@@ -39,16 +35,13 @@ class BibleServiceTest {
     @InjectMocks
     private BibleService bibleService;
 
-    @Captor
-    ArgumentCaptor<OutboxEventEntity> outboxCaptor;
-
     @Test
     void getChapter_emptyReturnsEmptyVerses() {
         when(verseRepository.findAllByIdBookAndChapter(eq(1), eq(1), eq(1), any())).thenReturn(Arrays.asList());
 
         var result = bibleService.getChapter(1,1,null,false);
         assertNotNull(result);
-        assertTrue(((List)result.get("verses")).isEmpty());
+        assertTrue(result.verses().isEmpty());
     }
 
     @Test
@@ -62,10 +55,10 @@ class BibleServiceTest {
 
         var result = bibleService.getChapter(1,1,null,false);
         assertNotNull(result);
-        List<Verse> verses = (List<Verse>) result.get("verses");
+        List<Verse> verses = result.verses();
         assertEquals(1, verses.size());
 
-        verify(outboxRepository, times(1)).save(any(OutboxEventEntity.class));
+        verify(outboxRecorder, times(1)).record(anyString(), anyString());
     }
 
     @Test
@@ -73,7 +66,7 @@ class BibleServiceTest {
         when(searchRepository.findAllByWord(anyInt(), anyString())).thenReturn(Arrays.asList());
         var resp = bibleService.search("term", false);
         assertNotNull(resp);
-        assertTrue(((List)resp.get("verses")).isEmpty());
+        assertTrue(resp.verses().isEmpty());
     }
 
     @Test
@@ -92,7 +85,7 @@ class BibleServiceTest {
 
         var resp = bibleService.search("term", false);
         assertNotNull(resp);
-        List<SearchResponse> verses = (List<SearchResponse>) resp.get("verses");
+        List<SearchResponse> verses = resp.verses();
         assertEquals(1, verses.size());
         SearchResponse sr = verses.get(0);
         assertEquals(1, sr.idBook());

@@ -4,10 +4,8 @@ import com.gdav.bible.bible_references.exception.ResourceNotFoundException;
 import com.gdav.bible.bible_references.model.SourceWordResponse;
 import com.gdav.bible.bible_references.model.SourceWordWithKeywordStatsResponse;
 import com.gdav.bible.bible_references.repository.CompoundWordRepository;
-import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SourceWordRepository;
 import com.gdav.bible.bible_references.repository.entity.CompoundWordEntity;
-import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,13 +31,13 @@ class StrongServiceTest {
     private CompoundWordRepository compoundWordRepository;
 
     @Mock
-    private OutboxRepository outboxRepository;
+    private OutboxRecorder outboxRecorder;
 
     @InjectMocks
     private StrongService strongService;
 
     @Captor
-    ArgumentCaptor<OutboxEventEntity> outboxCaptor;
+    ArgumentCaptor<String> payloadCaptor;
 
     @BeforeEach
     void setUp() {
@@ -79,9 +77,8 @@ class StrongServiceTest {
         // el primer estadístico corresponde al transliterated counts (2)
 //        assertEquals(0, res.keywordStats().get(0).count());
         // Persiste evento outbox
-        verify(outboxRepository, times(1)).save(outboxCaptor.capture());
-        OutboxEventEntity captured = outboxCaptor.getValue();
-        assertTrue(captured.getPayload().contains(keyUpper));
+        verify(outboxRecorder, times(1)).record(eq("CompoundKeywordQueried"), payloadCaptor.capture());
+        assertTrue(payloadCaptor.getValue().contains(keyUpper));
     }
 
     @Test

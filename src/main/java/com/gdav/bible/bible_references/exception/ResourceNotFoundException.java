@@ -1,8 +1,8 @@
 package com.gdav.bible.bible_references.exception;
 
-public class ResourceNotFoundException extends RuntimeException {
+/** Recurso no encontrado. Se mapea a HTTP 404. */
+public class ResourceNotFoundException extends AppException {
     public ResourceNotFoundException(String message) {
-        super(message);
+        super(ErrorCode.RESOURCE_NOT_FOUND, message);
     }
 }
-

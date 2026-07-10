@@ -5,42 +5,36 @@ import com.gdav.bible.bible_references.exception.ResourceNotFoundException;
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
 import com.gdav.bible.bible_references.model.*;
 import com.gdav.bible.bible_references.repository.CompoundWordRepository;
-import com.gdav.bible.bible_references.repository.OutboxRepository;
 import com.gdav.bible.bible_references.repository.SourceWordRepository;
 import com.gdav.bible.bible_references.repository.entity.CompoundWordEntity;
-import com.gdav.bible.bible_references.repository.entity.OutboxEventEntity;
 import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class StrongService {
+public class StrongService implements IStrongService {
 
     private final SourceWordRepository sourceWordRepository;
     private final CompoundWordRepository compoundWordRepository;
-    private final OutboxRepository outboxRepository;
+    private final OutboxRecorder outboxRecorder;
     private static final Logger logger = LoggerFactory.getLogger(StrongService.class);
 
-    public StrongService(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository, OutboxRepository outboxRepository) {
+    public StrongService(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository, OutboxRecorder outboxRecorder) {
         this.sourceWordRepository = sourceWordRepository;
         this.compoundWordRepository = compoundWordRepository;
-        this.outboxRepository = outboxRepository;
+        this.outboxRecorder = outboxRecorder;
     }
 
+    @Override
     @Transactional(readOnly = true)
     public SourceWordWithKeywordStatsResponse getStrongKeywordsGrouped(String strongCode, Boolean includeLXX) {
-        if (strongCode == null || strongCode.trim().isEmpty()) {
-            throw new IllegalArgumentException("strongCode is required");
-        }
-
         boolean includeLxx = includeLXX != null && includeLXX;
         List<String> sources = includeLxx ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
         String keyUpper = strongCode.toUpperCase();
@@ -98,8 +92,7 @@ public class StrongService {
             // Outbox event
             try {
                 String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}", keyUpper, sources);
-                OutboxEventEntity event = new OutboxEventEntity("CompoundKeywordQueried", payload, LocalDateTime.now());
-                outboxRepository.save(event);
+                outboxRecorder.record("CompoundKeywordQueried", payload);
             } catch (Exception ex) {
                 logger.error("Failed to persist outbox event for StrongKeywordsGrouped (compound)", ex);
             }
@@ -157,8 +150,7 @@ public class StrongService {
 
         try {
             String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}", keyUpper, sources);
-            OutboxEventEntity event = new OutboxEventEntity("KeywordQueried", payload, LocalDateTime.now());
-            outboxRepository.save(event);
+            outboxRecorder.record("KeywordQueried", payload);
         } catch (Exception ex) {
             logger.error("Failed to persist outbox event for StrongKeywordsGrouped (source)", ex);
         }
@@ -166,12 +158,9 @@ public class StrongService {
         return model;
     }
 
+    @Override
     @Transactional(readOnly = true)
     public SourceWordResponse getStrongDetail(String strongCode, String transliteratedWord, String translatedWord, Boolean includeLXX) {
-        if (strongCode == null || strongCode.trim().isEmpty()) {
-            throw new IllegalArgumentException("strongCode is required");
-        }
-
         boolean include = includeLXX != null && includeLXX;
         List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
         String keyUpper = strongCode.toUpperCase();

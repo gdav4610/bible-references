@@ -1,6 +1,22 @@
 spring:
   application:
     name: bible-references
+  profiles:
+    active: local-insecure
+  threads:
+    virtual:
+      enabled: false
+  cloud:
+    config:
+      # Se usa cuando spring.cloud.config.enabled es true
+      enabled: false
+      uri: http://config-service:8080
+      name: ${spring.application.name}
+      label: master
+      profile: ${spring.profiles.active}
+  config:
+    # Se usa en entorno LOCAL, cuando spring.cloud.config.enabled es false
+    name: ${spring.application.name}
   datasource:
     url: jdbc:postgresql://localhost:5432/bible_db?currentSchema=bible_schema
     username: postgres
@@ -21,6 +37,17 @@ spring:
 app:
   frontend:
     origin: "https://escrituraclave.com"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+logging:
+  level:
+    com.gdav: INFO
 
 management:
   endpoints:
