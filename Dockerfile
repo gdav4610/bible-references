@@ -8,6 +8,10 @@ RUN mvn -B -DskipTests package -DskipITs
 
 # Stage 2: Run (Java 25 LTS)
 FROM eclipse-temurin:25-jre-jammy
+# La imagen JRE no trae curl, y el health check del contenedor lo necesita.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
 ARG JAR_FILE=target/*.jar
 COPY --from=build /app/${JAR_FILE} /app/app.jar
 EXPOSE 8080
