@@ -36,6 +36,7 @@ env:
   ECS_SERVICE: bible-references-service
   ECS_CLUSTER: biblia-cluster
   CONTAINER_NAME: bible-references
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   deploy:
