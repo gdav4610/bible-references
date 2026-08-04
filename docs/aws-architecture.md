@@ -4,8 +4,28 @@ Cuenta: `274869222183` · Región: `mx-central-1` (México) · VPC: `vpc-0a224ec
 
 Topología **verificada contra la infraestructura real** el 2026-07-31 mediante comandos
 `describe-*` de la AWS CLI (identidad `arn:aws:iam::274869222183:user/gdgr`). Los nombres
-de recursos, IDs, reglas de red y rutas de este documento provienen de la API de AWS, no
-de inferencias sobre el repositorio.
+de recursos, IDs, reglas de red y rutas provienen de la API de AWS, no de inferencias
+sobre el repositorio.
+
+**Este documento describe el estado posterior a los cambios aplicados el 2026-07-31.**
+Ver el registro de cambios más abajo.
+
+## Registro de cambios aplicados (2026-07-31)
+
+| Hora | Cambio | Recurso | Hallazgo |
+|---|---|---|---|
+| 20:06 | Ingress del ALB restringido a la prefix list de CloudFront; revocadas las reglas `80` y `443` desde `0.0.0.0/0` | `sg-0f48e25801a170bef` | 2, fase 1 |
+| 21:08 | Registrada revisión 18 con `startPeriod: 180` y `timeout: 15` — **intento fallido**, no corrigió nada | `bible-references-task:18` | 0 |
+| 21:29 | Registrada y desplegada revisión 19 **sin health check de contenedor** | `bible-references-task:19` | 0 |
+| 21:40 | Header `X-Origin-Verify` inyectado en el origen `Backend-API` | CloudFront `E1MTT1XP2UUMYU` | 2, fase 2 |
+| 21:44 | Regla de listener con prioridad 1 exigiendo el header; acción por defecto a `403` | Listener `:80` de `bible-alb` | 2, fase 2 |
+| 21:55 | Despliegue de CI con la imagen que instala `curl` (`Dockerfile` versionado) | `bible-references-task:20` | 0 |
+| 22:05 | Health check de contenedor restaurado (`startPeriod: 180`, `timeout: 15`) | `bible-references-task:21` | 0 |
+
+Runbooks con el detalle y los procedimientos de reversión:
+
+- `runbook-hallazgo-0-bucle-reinicio.md`
+- `runbook-hallazgo-2-alb-bypass.md`
 
 ## Diagrama general
 
@@ -20,17 +40,17 @@ flowchart TB
     USER(["Navegador"])
 
     subgraph aws["AWS · cuenta 274869222183"]
-        CF["CloudFront E1MTT1XP2UUMYU<br/>escrituraclave.com · www<br/>redirect-to-https"]
+        CF["CloudFront E1MTT1XP2UUMYU<br/>escrituraclave.com · www<br/>redirect-to-https<br/>inyecta X-Origin-Verify"]
         S3[("S3 biblia-frontend-prod<br/>bundle estático · acceso público bloqueado")]
 
         ECR["Amazon ECR<br/>bible-references :latest / :sha"]
 
         subgraph vpc["VPC vpc-0a224eceeb1c0720a · mx-central-1"]
             subgraph pub["Subredes PÚBLICAS · rtb-0b06ff11bb534e762 → IGW"]
-                ALB["ALB bible-alb · internet-facing<br/>listener HTTP :80 (sin 443)<br/>sg-0f48e25801a170bef"]
+                ALB["ALB bible-alb · internet-facing<br/>listener HTTP :80<br/>regla 1: X-Origin-Verify → forward<br/>default: 403<br/>SG: solo prefix list CloudFront"]
 
                 subgraph ecs["ECS cluster biblia-cluster"]
-                    TASK["Task bible-references-task:17 · FARGATE<br/>1/1 running · 512 CPU / 1024 MB<br/>:8080 · sg-09f1e2be72d76adbe<br/>assignPublicIp ENABLED"]
+                    TASK["Task bible-references-task:21 · FARGATE<br/>1/1 running · 512 CPU / 1024 MB<br/>:8080 · sg-09f1e2be72d76adbe<br/>health check HEALTHY"]
                 end
 
                 RDS[("RDS database-2 · PostgreSQL 17.9<br/>db.t4g.micro · single-AZ<br/>PubliclyAccessible TRUE<br/>sg default: 5432 desde 0.0.0.0/0")]
@@ -50,12 +70,12 @@ flowchart TB
 
     USER -->|"HTTPS"| CF
     CF -->|"default behavior · OAC"| S3
-    CF -->|"behavior /api/* · origin http-only"| ALB
+    CF -->|"behavior /api/* · http-only<br/>con header secreto"| ALB
     ALB -->|"HTTP :8080 · tg bible-tg<br/>health /actuator/health"| TASK
     TASK -->|"JDBC 5432"| RDS
 
-    INTERNET -.->|"HTTP :80 directo<br/>elude CloudFront"| ALB
-    INTERNET -.->|"tcp 5432 abierto"| RDS
+    INTERNET -->|"tcp 5432 ABIERTO<br/>hallazgo 1 sin resolver"| RDS
+    INTERNET -.->|"bloqueado: SG + header"| ALB
 
     TASK -.->|"secretos al arrancar"| SM
     TASK -.->|"awslogs"| CW
@@ -64,7 +84,7 @@ flowchart TB
     classDef awsSvc fill:#232f3e,stroke:#ff9900,color:#fff
     classDef ext fill:#1a4d5c,stroke:#4dd0e1,color:#fff
     classDef risk fill:#5c1a1a,stroke:#e57373,color:#fff
-    class ECR,ALB,TASK,SM,CW,IAM,CF,S3 awsSvc
+    class ECR,TASK,SM,CW,IAM,CF,S3,ALB awsSvc
     class GH,GHA,USER ext
     class RDS,INTERNET risk
 ```
@@ -76,7 +96,7 @@ CloudFront **sí fronteda la API**. La distribución `E1MTT1XP2UUMYU` tiene dos 
 | Behavior | Origen | Destino | Protocolo al origen |
 |---|---|---|---|
 | default | `biblia-frontend-prod.s3...` | S3 (bundle estático) | OAC, sin acceso público |
-| `/api/*` | `Backend-API` | `bible-alb-1227546912.mx-central-1.elb.amazonaws.com` | `http-only` |
+| `/api/*` | `Backend-API` | `bible-alb-1227546912...elb.amazonaws.com` | `http-only` + header `X-Origin-Verify` |
 
 Consecuencias:
 
@@ -86,6 +106,8 @@ Consecuencias:
   interviene en el camino de producción**. La configuración de `app.frontend.origin` y el
   `OriginValidationFilter` siguen siendo útiles para desarrollo local y como defensa en
   profundidad, pero no son lo que habilita el tráfico real.
+- Desde el 2026-07-31, el ALB solo acepta conexiones desde los rangos de CloudFront **y**
+  solo atiende peticiones que traigan el header secreto. Todo lo demás recibe 403.
 
 ## Flujo de despliegue (CI/CD)
 
@@ -111,23 +133,30 @@ sequenceDiagram
     ECS-->>GHA: servicio estable (wait-for-service-stability)
 ```
 
+> **El `task-definition.json` del repositorio no se despliega.** El workflow lo sobrescribe
+> con `aws ecs describe-task-definition` antes de renderizar, así que editarlo no tiene
+> efecto: los cambios de CPU, memoria o health check hay que registrarlos como revisión
+> nueva en AWS. Invertir esa relación —que el repo sea la fuente de verdad— está pendiente
+> como mejora de pipeline.
+
 ## Componentes verificados
 
 | Componente | Identificador | Detalle confirmado |
 |---|---|---|
-| CDN | CloudFront `E1MTT1XP2UUMYU` | Alias `escrituraclave.com` y `www`; `redirect-to-https`; estado `Deployed` |
+| CDN | CloudFront `E1MTT1XP2UUMYU` | Alias `escrituraclave.com` y `www`; `redirect-to-https`; inyecta `X-Origin-Verify` en el origen `Backend-API` |
 | Frontend estático | S3 `biblia-frontend-prod` | Los 4 flags de Block Public Access en `true`; policy no pública |
 | Registro de imágenes | ECR `bible-references` | Tags `:latest` y `:<git-sha>` |
 | Cluster | `biblia-cluster` | ECS |
 | Servicio | `bible-references-service` | `ACTIVE`, desired 1 / running 1, FARGATE |
-| Task definition | `bible-references-task:17` | 512 CPU / 1024 MB, `awsvpc` |
+| Task definition | `bible-references-task:21` | 512 CPU / 1024 MB, `awsvpc`, health check `curl -f .../actuator/health` con `startPeriod: 180` |
 | Red de la task | subredes `...1526d` (1a) y `...87fcd` (1b) | `assignPublicIp: ENABLED`, SG `sg-09f1e2be72d76adbe` |
-| Load balancer | `bible-alb` | Internet-facing; **un solo listener: HTTP:80** |
+| Load balancer | `bible-alb` | Internet-facing; un solo listener: HTTP:80 |
+| Reglas del listener | prioridad 1 / default | 1: header `X-Origin-Verify` → `forward` a `bible-tg`; default: `fixed-response` 403 |
 | Target group | `bible-tg` | HTTP 8080, target type `ip`, health check `/actuator/health`, intervalo 30 s, umbral 2 |
-| SG del ALB | `sg-0f48e25801a170bef` (`bible-alb-sg`) | Ingress 80 y 443 desde `0.0.0.0/0` |
+| SG del ALB | `sg-0f48e25801a170bef` (`bible-alb-sg`) | Única regla de entrada: `tcp/80` desde `pl-0246509e78ddf0729` |
 | SG de las tasks | `sg-09f1e2be72d76adbe` (`bible-ecs-sg`) | Ingress 8080 **solo desde `bible-alb-sg`** — correcto |
 | Base de datos | RDS `database-2` | PostgreSQL 17.9, `db.t4g.micro`, single-AZ, cifrada, backup 1 día |
-| SG de la base de datos | `sg-050bc646783252d10` (`default`) | Ingress **5432 desde `0.0.0.0/0`** |
+| SG de la base de datos | `sg-050bc646783252d10` (`default`) | Ingress **5432 desde `0.0.0.0/0`** — sin resolver |
 | Subredes y rutas | `rtb-0b06ff11bb534e762` (main) | Única tabla de rutas: `0.0.0.0/0 → igw-01d6dea5b230b8bdb`; **todas las subredes son públicas** |
 | Secretos | `bible-references/db` | URL apunta a `database-2...rds.amazonaws.com:5432/bible_db` |
 | Logs | `/ecs/bible-references` | Driver `awslogs`, prefijo `ecs` |
@@ -135,66 +164,61 @@ sequenceDiagram
 
 ## Hallazgos
 
-### 0. ACTIVO — El servicio está en bucle de reinicio
+### 0. RESUELTO — Bucle de reinicio del servicio
 
-ECS reemplaza la task de forma continua, al menos desde las 18:00 del 2026-07-31 (el grupo
-de logs acumula ~58 streams). Los tasks mueren con `healthStatus: UNHEALTHY` y
+ECS reemplazaba la task continuamente. Los tasks morían con `healthStatus: UNHEALTHY` y
 `exitCode: 137`.
 
-**Causa confirmada: `curl` no existe en la imagen del contenedor.**
-
-El health check de la task definition es:
+**Causa: `curl` no existe en la imagen del contenedor.** El health check de la task
+definition era:
 
 ```
 CMD-SHELL   curl -f http://localhost:8080/actuator/health || exit 1
 ```
 
-Y la imagen desplegada no lo tiene. Verificado ejecutando la imagen real de ECR:
+`eclipse-temurin:25-jre-jammy` es una imagen JRE mínima que no trae `curl` ni `wget`.
+Verificado ejecutando la imagen real de ECR:
 
 ```
 $ docker run --rm --entrypoint sh <ecr>/bible-references:latest -c "command -v curl"
 CURL NO EXISTE
-$ ls /usr/bin/curl
-ls: cannot access '/usr/bin/curl': No such file or directory
 ```
 
-`eclipse-temurin:25-jre-jammy` es una imagen JRE mínima: no trae `curl` ni `wget`. El
-comando del health check falla **siempre**, con independencia del estado de la
-aplicación, y ECS acaba reemplazando el contenedor.
+El comando fallaba **siempre**, con independencia del estado de la aplicación. La app
+arrancaba correctamente y sin errores, en ~64 s (`Started BibleReferencesApplication in
+64.016 seconds`). El health check del **ALB** —que sí hace un GET HTTP real sobre el mismo
+endpoint— reportaba el target `healthy`. Esa asimetría entre un chequeo externo que pasa y
+uno interno que falla era la firma del problema.
 
-**La aplicación no tiene la culpa.** Arranca correctamente y sin errores, en ~64 s:
+Métricas que descartaron otras causas: memoria estable entre 26 % y 33 % (no es OOM), CPU
+en ~1,5 % fuera de los picos de arranque, y sin excepciones en el log.
 
-```
-Started BibleReferencesApplication in 64.016 seconds
-```
+**Secuencia de corrección:**
 
-Métricas que descartan otras causas: la memoria se mantiene estable entre 26 % y 33 % (no
-es OOM), fuera de los picos de arranque la CPU ronda el 1,5 %, y no hay excepciones en el
-log. El health check del **ALB** —que sí hace un GET HTTP real sobre el mismo endpoint—
-reporta el target `healthy`. Esa asimetría entre un chequeo externo que pasa y uno interno
-que falla es la firma del problema.
+| Rev | Cambio | Resultado |
+|---|---|---|
+| 18 | `startPeriod` 60 → 180, `timeout` 10 → 15 | **Fallido** — el comando nunca podía tener éxito |
+| 19 | Health check de contenedor eliminado | Bucle detenido; task en `UNKNOWN` |
+| 20 | Despliegue de CI con la imagen que instala `curl` | `curl 7.81.0` confirmado en producción |
+| 21 | Health check restaurado (`startPeriod: 180`, `timeout: 15`) | **`healthStatus: HEALTHY`** |
+
+El `Dockerfile` versionado instala `curl` en la etapa de runtime, así que las imágenes
+futuras lo conservarán. El último fallo de health check en el historial del servicio es de
+las 21:26:47, previo a la revisión 19; no ha habido ninguno después.
 
 > **Intento fallido registrado para no repetirlo.** Se atribuyó primero el fallo a que el
 > `startPeriod` de 60 s quedaba 4 s por debajo del arranque de 64 s, y se registró la
-> revisión 18 con `startPeriod: 180` y `timeout: 15`. **No sirvió**: los tasks de la
-> revisión 18 siguen `UNHEALTHY`, porque el comando nunca puede tener éxito. El
-> razonamiento que descartó la hipótesis de `curl` —"si faltara, ningún task pasaría de
-> ~150 s"— era erróneo: ECS no reemplaza el contenedor en cuanto lo marca `UNHEALTHY`,
-> sino con una latencia observada de entre 8 y 20 minutos.
-
-Remediación (ver `runbook-hallazgo-0-bucle-reinicio.md`):
-
-- **Sin reconstruir la imagen:** sustituir el comando por uno que use `bash` con
-  `/dev/tcp`, disponible en la imagen; o eliminar el health check de contenedor y confiar
-  en el del ALB, que ya funciona y también provoca el reemplazo de tasks caídos.
-- **Reconstruyendo:** instalar `curl` en el `Dockerfile` y conservar el chequeo actual.
+> revisión 18 con `startPeriod: 180` y `timeout: 15`. No sirvió: el comando nunca podía
+> tener éxito. El razonamiento que descartó la hipótesis de `curl` —"si faltara, ningún
+> task pasaría de ~150 s"— era erróneo, porque ECS no reemplaza el contenedor en cuanto lo
+> marca `UNHEALTHY`, sino con una latencia observada de entre 8 y 20 minutos.
 
 Herramientas disponibles en la imagen, comprobadas: `bash`, `perl`, `getent`, `timeout`,
 `java`. Ausentes: `curl`, `wget`, `nc`, `python3`, `busybox`.
 
-### 1. CRÍTICO — La base de datos está expuesta a internet
+### 1. CRÍTICO — SIN RESOLVER — La base de datos está expuesta a internet
 
-Tres condiciones verificadas se combinan:
+**Es el único hallazgo crítico y sigue abierto.** Tres condiciones verificadas se combinan:
 
 - `database-2` tiene `PubliclyAccessible: true`.
 - Vive en el subnet group `default-vpc-0a224eceeb1c0720a`, cuyas tres subredes usan la
@@ -222,17 +246,43 @@ Remediación, en orden:
 > de mantenimiento y confirmando primero que la task de ECS alcanza la instancia por su
 > DNS interno.
 
-### 2. ALTO — El ALB es alcanzable saltándose CloudFront
+### 2. RESUELTO — El ALB era alcanzable saltándose CloudFront
 
-`bible-alb-sg` admite 80 y 443 desde `0.0.0.0/0`, así que cualquiera puede pegarle
-directamente a `bible-alb-1227546912.mx-central-1.elb.amazonaws.com` **en HTTP plano**,
-evitando el edge. Todo lo que CloudFront aporte (WAF, rate limiting, caché, TLS) se
-esquiva trivialmente, y el tráfico viaja sin cifrar.
+`bible-alb-sg` admitía 80 y 443 desde `0.0.0.0/0`, de modo que cualquiera podía pegarle
+directamente al DNS del balanceador en HTTP plano, evitando el edge y todo lo que
+CloudFront aporta.
 
-Remediación: restringir el ingress del ALB a la managed prefix list
-`com.amazonaws.global.cloudfront.origin-facing`, y añadir un header secreto en el origin de
-CloudFront que el ALB exija mediante una regla del listener. Eliminar además la regla 443,
-que hoy no tiene listener detrás.
+**Aplicado en dos fases:**
+
+*Fase 1 (red).* El SG del ALB quedó con una única regla de entrada: `tcp/80` desde la
+managed prefix list `pl-0246509e78ddf0729`
+(`com.amazonaws.global.cloudfront.origin-facing`). Se revocaron las reglas `80` y `443`
+desde `0.0.0.0/0`; la de 443 no tenía listener detrás.
+
+*Fase 2 (identidad del origen).* La fase 1 deja fuera a cualquier host que no sea
+CloudFront, pero no distingue esta distribución de la de otra cuenta. CloudFront inyecta
+ahora `X-Origin-Verify` con un valor secreto de 32 bytes, y el listener del ALB lo exige:
+
+| Prioridad | Condición | Acción |
+|---|---|---|
+| 1 | header `X-Origin-Verify` con el valor secreto | `forward` a `bible-tg` |
+| default | — | `fixed-response` 403 |
+
+Verificado tras el cambio: el sitio y `/api/bible/chapter/1/1` responden 200, el acceso
+directo al DNS del ALB agota el tiempo de espera, y el target sigue `healthy`.
+
+El secreto vive únicamente en la configuración de CloudFront; no se guardó copia local.
+Para recuperarlo:
+
+```bash
+aws cloudfront get-distribution-config --id E1MTT1XP2UUMYU \
+  --query 'DistributionConfig.Origins.Items[?Id==`Backend-API`].CustomHeaders.Items' \
+  --output json
+```
+
+> **Lo que esto no cubre:** el tramo CloudFront → ALB sigue siendo `http-only`, sin
+> cifrar. Cerrarlo requiere un listener 443 en el ALB con certificado ACM y cambiar el
+> origen a `https-only`. Queda pendiente.
 
 ### 3. MEDIO — Sin resiliencia en la capa de datos ni en la de cómputo
 
@@ -262,7 +312,7 @@ El workflow se autentica con `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY`, cred
 de larga vida guardadas como secretos del repositorio. OIDC con un rol asumible las
 elimina por completo.
 
-### 6b. POR CONFIRMAR — Peticiones reales rechazadas por el filtro de origen
+### 6b. POR CONFIRMAR — Peticiones rechazadas por el filtro de origen
 
 `OriginValidationFilter` no valida el header estándar `Origin`, sino uno propio,
 `X-Client-Origin`, y devuelve 403 cuando falta. En los logs aparecen rechazos sobre rutas
@@ -279,6 +329,10 @@ al ALB, y el filtro está haciendo su trabajo. Si no lo envía, son usuarios rea
 recibiendo 403. Conviene revisar el cliente antes de decidir si es un problema; el nombre
 del header hace fácil confundirlo con el `Origin` que manda el navegador solo.
 
+> Nota: tras la fase 2 del hallazgo 2, los bots ya no pueden alcanzar el ALB
+> directamente, así que si estos rechazos eran escáneres deberían desaparecer del log. Es
+> una forma sencilla de despejar la duda: si siguen apareciendo, vienen del frontend.
+
 ### 7. BAJO — Grupos de seguridad huérfanos
 
 `biblia-sg` (`sg-06179292d0aba63da`) y `biblia-alb-sg` (`sg-097d84a75b2c197ef`) tienen
@@ -287,10 +341,12 @@ impacto.
 
 ### 8. INFORMATIVO — Infraestructura no versionada
 
-Nada de lo anterior —distribución de CloudFront, bucket S3, listener, target group,
-instancia RDS, subredes, grupos de seguridad— vive en el repositorio. Todo se creó a mano
-y solo se puede auditar consultando la API. Llevarlo a Terraform o CDK haría que los
-hallazgos 1, 2 y 3 fueran visibles en una revisión de código en vez de requerir una
+Nada de lo anterior —distribución de CloudFront, bucket S3, listener, reglas, target
+group, instancia RDS, subredes, grupos de seguridad— vive en el repositorio. Todo se creó
+a mano y solo se puede auditar consultando la API. Los cambios aplicados el 2026-07-31
+tampoco quedaron en código: existen en AWS y están documentados aquí y en los runbooks,
+pero nada impide que se reviertan sin dejar rastro. Llevarlo a Terraform o CDK haría que
+los hallazgos 1 y 3 fueran visibles en una revisión de código en vez de requerir una
 auditoría manual.
 
 ## Lo que sí está bien configurado
@@ -302,21 +358,60 @@ auditoría manual.
 - El almacenamiento de RDS está cifrado.
 - El health check del target group coincide con el endpoint que Actuator expone, y
   Actuator no publica más que `health` con `show-details: never`.
+- Desde el 2026-07-31, el ALB solo es alcanzable desde CloudFront y solo con el header
+  secreto.
 
 ## Cómo se verificó
+
+Consultas de solo lectura usadas para levantar el inventario:
 
 ```bash
 aws sts get-caller-identity
 aws elbv2 describe-listeners --load-balancer-arn <bible-alb>
+aws elbv2 describe-rules --listener-arn <listener>
 aws elbv2 describe-target-groups --names bible-tg
+aws elbv2 describe-target-health --target-group-arn <bible-tg>
 aws ecs describe-services --cluster biblia-cluster --services bible-references-service
+aws ecs describe-task-definition --task-definition bible-references-task
+aws ecs describe-tasks --cluster biblia-cluster --tasks <task>
 aws rds describe-db-instances
-aws ec2 describe-security-groups --filters Name=vpc-id,Values=vpc-0a224eceeb1c0720a
-aws ec2 describe-route-tables --filters Name=vpc-id,Values=vpc-0a224eceeb1c0720a
-aws ec2 describe-network-interfaces --filters Name=group-id,Values=<sg>
+aws ec2 describe-security-groups     --filters Name=vpc-id,Values=vpc-0a224eceeb1c0720a
+aws ec2 describe-security-group-rules --filters Name=group-id,Values=<sg>
+aws ec2 describe-route-tables        --filters Name=vpc-id,Values=vpc-0a224eceeb1c0720a
+aws ec2 describe-network-interfaces  --filters Name=group-id,Values=<sg>
+aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing
 aws cloudfront list-distributions
-aws s3api get-public-access-block --bucket biblia-frontend-prod
-aws s3api get-bucket-policy-status --bucket biblia-frontend-prod
+aws cloudfront get-distribution-config --id E1MTT1XP2UUMYU
+aws s3api get-public-access-block   --bucket biblia-frontend-prod
+aws s3api get-bucket-policy-status  --bucket biblia-frontend-prod
+aws logs get-log-events --log-group-name /ecs/bible-references --log-stream-name <stream>
+aws cloudwatch get-metric-statistics --namespace AWS/ECS --metric-name MemoryUtilization ...
 ```
 
-Todos son de solo lectura; ninguno modificó infraestructura.
+Comandos que **sí modificaron** infraestructura, todos documentados en los runbooks con su
+reversión:
+
+```bash
+aws ec2 authorize-security-group-ingress   # regla con prefix list de CloudFront
+aws ec2 revoke-security-group-ingress      # reglas 80 y 443 abiertas
+aws ecs register-task-definition           # revisiones 18 y 19
+aws ecs update-service                     # despliegue de la revisión 19
+aws cloudfront update-distribution         # header X-Origin-Verify
+aws elbv2 create-rule                      # regla de prioridad 1
+aws elbv2 modify-listener                  # acción por defecto a 403
+```
+
+> Sobre el entorno de trabajo: la AWS CLI en Windows falla con
+> `'charmap' codec can't encode character` al leer logs con emoji; se soluciona con
+> `PYTHONUTF8=1`. Git Bash convierte rutas como `/ecs/bible-references` en rutas de
+> Windows; se soluciona con `MSYS_NO_PATHCONV=1`. Y el `curl` de schannel puede fallar con
+> `CRYPT_E_REVOCATION_OFFLINE`, que se sortea con `--ssl-no-revoke`.
+
+## Trabajo pendiente, por prioridad
+
+1. **Hallazgo 1** — cerrar el acceso a RDS desde internet. Único crítico abierto.
+2. **Hallazgo 3** — deletion protection y retención de backups en RDS.
+3. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
+4. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
+5. **Hallazgos 4, 5, 6, 7** — Hazelcast, separación de roles IAM, OIDC, limpieza de SGs.
+6. **Hallazgo 8** — llevar la infraestructura a código.

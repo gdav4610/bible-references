@@ -369,6 +369,89 @@ Records vs Clases (guía rápida)
 | DTO que requiere herencia                | clase abstracta  |
 | ErrorResponse del ControllerAdvice       | `record`         |
 
+Contenedores y health checks
+----------------------------
+Reglas derivadas de incidentes reales en este proyecto (2026-07-31). Ver
+`docs/aws-architecture.md` y los runbooks asociados para el detalle.
+
+**Nunca asumir que un binario existe en la imagen base.**
+Las imágenes `-jre-` de Eclipse Temurin son mínimas: no incluyen `curl`, `wget`, `nc` ni
+`python3`. Un `HEALTHCHECK` o un `ENTRYPOINT` que invoque una de esas herramientas falla
+siempre, con independencia del estado de la aplicación. Comprobar antes de escribirlo:
+
+```bash
+docker run --rm --entrypoint sh <imagen> -c "command -v curl || echo AUSENTE"
+```
+
+Si la herramienta hace falta, instalarla explícitamente en la etapa de runtime:
+
+```dockerfile
+FROM eclipse-temurin:25-jre-jammy
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+**Diagnóstico: un chequeo externo que pasa mientras el interno falla apunta al mecanismo,
+no a la aplicación.**
+Si el balanceador reporta el target `healthy` y el contenedor sale `UNHEALTHY` contra el
+mismo endpoint, el problema está en cómo se ejecuta el chequeo. Antes de tocar tiempos o
+recursos, verificar el comando en sí. Confirmar además que la aplicación arranca sin
+errores revisando los logs; `Started XApplication in N seconds` es la prueba de que el
+fallo no es del arranque.
+
+**El `startPeriod` debe superar el tiempo de arranque medido, no el estimado.**
+Tomar el valor real de `Started XApplication in N seconds` y dejar margen amplio. En este
+proyecto el arranque es de ~64 s con Hibernate, 6 repositorios JPA y Hazelcast embebido en
+0,5 vCPU; el `startPeriod` quedó en 180 s.
+
+**No dar por buena una hipótesis sin comprobarla contra el artefacto real.**
+Que un contenedor sobreviva más tiempo del que sugiere `startPeriod + interval × retries`
+no descarta que el comando falle: el planificador de ECS no reemplaza la task en cuanto la
+marca `UNHEALTHY`, sino con una latencia observada de entre 8 y 20 minutos.
+
+**Health checks del orquestador y del balanceador son independientes.**
+El del balanceador consulta al contenedor por red y no atraviesa las reglas del listener;
+el del contenedor se ejecuta dentro. Ambos pueden discrepar sin que nada lo advierta.
+Conviene que apunten al mismo endpoint (`/actuator/health`) para que la discrepancia sea
+diagnóstica.
+
+Exposición de servicios detrás de un CDN
+---------------------------------------
+Cuando un CDN fronteda la API —en este proyecto, CloudFront enruta `/api/*` al balanceador—
+el origen **no debe ser alcanzable directamente**. Si lo es, todo lo que aporte el borde
+(WAF, rate limiting, caché, TLS) se esquiva apuntando al DNS del balanceador. Dos capas,
+ambas necesarias:
+
+1. **Red:** restringir el ingress del balanceador a la managed prefix list del CDN
+   (`com.amazonaws.global.cloudfront.origin-facing`), no a `0.0.0.0/0`.
+2. **Identidad del origen:** la capa anterior no distingue tu distribución de la de otra
+   cuenta. El CDN inyecta un header secreto y el listener lo exige mediante una regla; la
+   acción por defecto responde `403`.
+
+**El orden de aplicación importa.** Primero inyectar el header en el CDN y esperar a que
+despliegue en todos los edges; después crear la regla que reenvía con el header; y solo al
+final cambiar la acción por defecto a `403`. Invertir los dos últimos pasos corta
+producción entre un comando y el siguiente.
+
+Consecuencia de diseño: si el CDN y la API comparten origen, **el CORS no interviene en el
+camino de producción**. La configuración de orígenes permitidos sigue siendo útil para
+desarrollo local y como defensa en profundidad, pero no es lo que habilita el tráfico real;
+conviene no confundir una cosa con la otra al diagnosticar.
+
+Infraestructura y fuente de verdad
+----------------------------------
+**Verificar qué archivo despliega realmente el pipeline antes de editarlo.**
+El workflow de este proyecto ejecuta `aws ecs describe-task-definition > task-definition.json`
+antes de renderizar, de modo que **sobrescribe** el archivo versionado con lo que ya está
+registrado en AWS. Editar el archivo del repositorio no tiene ningún efecto: los cambios de
+CPU, memoria o health check hay que registrarlos como revisión nueva.
+
+Lo correcto es invertir esa relación —eliminar el paso de descarga y dejar que el render
+parta del archivo versionado— para que los cambios de infraestructura pasen por revisión de
+código. Mientras no se haga, todo cambio aplicado a mano debe quedar documentado con su
+procedimiento de reversión.
+
 Checklist para Pull Request
 ---------------------------
 - ¿El PR cumple con un contrato definido? (docs/tests)
@@ -377,6 +460,9 @@ Checklist para Pull Request
 - ¿El `@ControllerAdvice` cubre las nuevas excepciones introducidas?
 - ¿Added/updated tests? (unit + integration si aplica)
 - ¿No se añaden logs con datos sensibles? ¿Se respetan tamaños de página y límites por defecto?
+- Si el PR toca el `Dockerfile` o el health check: ¿se verificó que las herramientas que invoca existen en la imagen resultante?
+- Si el PR toca el arranque de la aplicación: ¿sigue el `startPeriod` por encima del tiempo real medido?
+- Si el PR toca `task-definition.json`: ¿se registró además la revisión en AWS? (el pipeline sobrescribe ese archivo)
 - ¿Mensajes de commit claros y atómicos? Ejemplos:
   - feat(strong-controller): add stats endpoint
   - fix(search-service): handle null query

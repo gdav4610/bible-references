@@ -130,49 +130,69 @@ La fase 1 deja fuera a cualquier host que no sea CloudFront, pero **no distingue
 distribución de la de otra cuenta**: cualquiera puede crear una distribución apuntando a
 tu ALB y su tráfico saldría de la misma prefix list. El header cierra esa vía.
 
+> Las rutas siguientes usan el temporal de Windows, no `/tmp`, que en Git Bash apunta a
+> `C:\tmp` y no existe. `MSYS_NO_PATHCONV=1` evita que Git Bash convierta las rutas de
+> AWS que empiezan por `/`.
+
 ### 2.1 · Generar el secreto
 
 ```bash
-SECRET=$(openssl rand -hex 32)
-echo "$SECRET"   # guárdalo; lo necesitas en 2.2 y 2.3
+export AWS_PAGER=""
+export MSYS_NO_PATHCONV=1
+D="$USERPROFILE/AppData/Local/Temp"
+
+openssl rand -hex 32 > "$D/.ovsecret"
+chmod 600 "$D/.ovsecret"
+S=$(cat "$D/.ovsecret")
+echo "secreto generado: ${#S} caracteres"   # no imprimir el valor completo
 ```
 
 ### 2.2 · Inyectarlo en el origen de CloudFront
 
-```bash
-aws cloudfront get-distribution-config --id E1MTT1XP2UUMYU > /tmp/dist.json
+El script lee el secreto del archivo en vez de recibirlo por variable de entorno, para que
+no aparezca en la línea de comandos ni en el historial del shell.
 
-SECRET="$SECRET" node -e "
-const fs = require('fs');
-const d = JSON.parse(fs.readFileSync('/tmp/dist.json','utf8'));
+```bash
+aws cloudfront get-distribution-config --id E1MTT1XP2UUMYU --output json > "$D/dist.json"
+
+cat > "$D/cf.js" <<'EOF'
+const fs = require("fs");
+const d = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const cfg = d.DistributionConfig;
-const o = cfg.Origins.Items.find(x => x.Id === 'Backend-API');
-if (!o) throw new Error('no se encontró el origen Backend-API');
+const o = cfg.Origins.Items.find(x => x.Id === "Backend-API");
+if (!o) throw new Error("no se encontro el origen Backend-API");
 o.CustomHeaders = { Quantity: 1, Items: [
-  { HeaderName: 'X-Origin-Verify', HeaderValue: process.env.SECRET }
+  { HeaderName: "X-Origin-Verify", HeaderValue: fs.readFileSync(process.argv[4],"utf8").trim() }
 ]};
-fs.writeFileSync('/tmp/dist-config.json', JSON.stringify(cfg));
-fs.writeFileSync('/tmp/etag.txt', d.ETag);
-console.log('config preparada, ETag ' + d.ETag);
-"
+fs.writeFileSync(process.argv[3], JSON.stringify(cfg));
+fs.writeFileSync(process.argv[5], d.ETag);
+console.log("ETag:", d.ETag);
+EOF
+
+node "$(cygpath -w "$D/cf.js")" \
+     "$(cygpath -w "$D/dist.json")" \
+     "$(cygpath -w "$D/dist-cfg.json")" \
+     "$(cygpath -w "$D/.ovsecret")" \
+     "$(cygpath -w "$D/etag.txt")"
 
 aws cloudfront update-distribution --id E1MTT1XP2UUMYU \
-  --distribution-config file:///tmp/dist-config.json \
-  --if-match "$(cat /tmp/etag.txt)" \
+  --distribution-config "file://$(cygpath -w "$D/dist-cfg.json")" \
+  --if-match "$(cat "$D/etag.txt")" \
   --query 'Distribution.Status' --output text
 ```
 
-Esperar a que el cambio llegue a todos los edges — **no continúes antes de que termine**,
-o la fase 2.3 devolverá 403 al tráfico legítimo:
+Esperar a que el cambio llegue a todos los edges — **no continuar antes de que termine**,
+o la fase 2.3 devolverá 403 al tráfico legítimo. En la aplicación real tardó unos 3
+minutos, pero puede llegar a 15:
 
 ```bash
 aws cloudfront wait distribution-deployed --id E1MTT1XP2UUMYU && echo "desplegado"
 ```
 
-Limpiar los archivos temporales, que contienen el secreto en claro:
+Comprobar que el sitio sigue bien (añadir el header no debería romper nada):
 
 ```bash
-rm -f /tmp/dist.json /tmp/dist-config.json /tmp/etag.txt
+curl -sS --ssl-no-revoke -o /dev/null -w 'sitio: %{http_code}\n' https://escrituraclave.com/
 ```
 
 ### 2.3 · Exigirlo en el ALB
@@ -182,17 +202,20 @@ El orden importa: primero se crea la regla que deja pasar el tráfico con header
 comando y el siguiente.
 
 ```bash
+S=$(cat "$D/.ovsecret")
 LISTENER='arn:aws:elasticloadbalancing:mx-central-1:274869222183:listener/app/bible-alb/6372b1995d9da0cf/7125b07b7a6f6016'
 TG='arn:aws:elasticloadbalancing:mx-central-1:274869222183:targetgroup/bible-tg/29e3a2cf8e88e754'
 
 # Primero: la regla que sí reenvía
 aws elbv2 create-rule --listener-arn "$LISTENER" --priority 1 \
-  --conditions "[{\"Field\":\"http-header\",\"HttpHeaderConfig\":{\"HttpHeaderName\":\"X-Origin-Verify\",\"Values\":[\"$SECRET\"]}}]" \
+  --conditions "[{\"Field\":\"http-header\",\"HttpHeaderConfig\":{\"HttpHeaderName\":\"X-Origin-Verify\",\"Values\":[\"$S\"]}}]" \
   --actions "[{\"Type\":\"forward\",\"TargetGroupArn\":\"$TG\"}]" \
   --query 'Rules[].RuleArn' --output text
 
 # Comprobar que el sitio sigue arriba ANTES de tocar el default
-curl -sS -o /dev/null -w 'via cdn: %{http_code}\n' https://escrituraclave.com/
+curl -sS --ssl-no-revoke -o /dev/null -w 'sitio: %{http_code}\n' https://escrituraclave.com/
+curl -sS --ssl-no-revoke -o /dev/null -w 'api:   %{http_code}\n' \
+  https://escrituraclave.com/api/bible/chapter/1/1
 
 # Después: todo lo que no traiga el header se rechaza
 aws elbv2 modify-listener --listener-arn "$LISTENER" \
@@ -200,16 +223,45 @@ aws elbv2 modify-listener --listener-arn "$LISTENER" \
   --query 'Listeners[].DefaultActions[].Type' --output text
 ```
 
-Verificación final:
+### 2.4 · Borrar los rastros del secreto
 
 ```bash
-curl -sS -o /dev/null -w 'via cdn: %{http_code}\n' https://escrituraclave.com/
+rm -f "$D/.ovsecret" "$D/dist.json" "$D/dist-cfg.json" "$D/etag.txt" "$D/cf.js"
+```
+
+El secreto queda solo en la configuración de CloudFront. Para recuperarlo:
+
+```bash
+aws cloudfront get-distribution-config --id E1MTT1XP2UUMYU \
+  --query 'DistributionConfig.Origins.Items[?Id==`Backend-API`].CustomHeaders.Items' \
+  --output json
+```
+
+### 2.5 · Verificación final
+
+```bash
+curl -sS --ssl-no-revoke -o /dev/null -w 'sitio: %{http_code}\n' https://escrituraclave.com/
 # esperado: 200
 
-curl -sS -o /dev/null -w 'directo sin header: %{http_code}\n' --max-time 10 \
+curl -sS -o /dev/null -w 'directo: %{http_code}\n' --max-time 12 \
   http://bible-alb-1227546912.mx-central-1.elb.amazonaws.com/actuator/health
-# esperado: timeout por la fase 1; y 403 si llegara a pasar la capa de red
+# esperado: timeout, bloqueado por la fase 1
+
+aws elbv2 describe-rules --listener-arn "$LISTENER" \
+  --query 'Rules[].{Priority:Priority,Cond:Conditions[].HttpHeaderConfig.HttpHeaderName,Action:Actions[].Type}' \
+  --output json
+
+aws elbv2 describe-target-health --target-group-arn "$TG" \
+  --query 'TargetHealthDescriptions[].TargetHealth.State' --output text
+# esperado: healthy — los health checks no pasan por las reglas del listener
 ```
+
+> **No se puede probar el 403 desde fuera.** La fase 1 bloquea el acceso directo en la capa
+> de red, así que no hay forma de emitir una petición sin el header que llegue al ALB. Que
+> el mecanismo funciona queda demostrado por implicación: la acción por defecto es 403 y el
+> tráfico legítimo sigue en 200, lo que prueba que la regla de prioridad 1 hace match con
+> las peticiones de CloudFront; cualquier petición sin el header cae necesariamente en el
+> default.
 
 **Reversión de la fase 2:**
 
@@ -218,8 +270,9 @@ curl -sS -o /dev/null -w 'directo sin header: %{http_code}\n' --max-time 10 \
 aws elbv2 modify-listener --listener-arn "$LISTENER" \
   --default-actions "[{\"Type\":\"forward\",\"TargetGroupArn\":\"$TG\"}]"
 
-# Borrar la regla del header (usar el ARN que devolvió create-rule)
-aws elbv2 delete-rule --rule-arn <RULE_ARN>
+# Borrar la regla del header
+aws elbv2 delete-rule --rule-arn \
+  'arn:aws:elasticloadbalancing:mx-central-1:274869222183:listener-rule/app/bible-alb/6372b1995d9da0cf/7125b07b7a6f6016/3d7e1478c5908164'
 ```
 
 ---
@@ -231,8 +284,9 @@ aws elbv2 delete-rule --rule-arn <RULE_ARN>
 anti-bypass, no un secreto de alto valor: rótalo periódicamente y no lo reutilices para
 otra cosa.
 
-**Queda en el historial del shell.** Tras terminar, conviene limpiar la variable y la
-entrada del historial (`unset SECRET`, y revisar `~/.bash_history`).
+**Puede quedar en el historial del shell.** El procedimiento de arriba lo evita leyendo el
+secreto desde un archivo en vez de pasarlo por variable de entorno o argumento, pero
+conviene revisar `~/.bash_history` de todos modos.
 
 **Cuota de reglas del security group.** La prefix list de CloudFront consume tantas
 entradas de la cuota del SG como direcciones tenga (varias decenas), contra un límite por

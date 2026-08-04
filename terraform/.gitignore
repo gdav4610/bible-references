@@ -1,0 +1,16 @@
+# El state contiene valores sensibles en claro: el header secreto de CloudFront
+# y atributos de RDS. Nunca versionarlo.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Los tfvars pueden contener secretos. El header se pasa por
+# TF_VAR_origin_verify_secret, no por archivo.
+*.tfvars
+*.tfvars.json
+!example.tfvars
+
+# Planes guardados: incluyen los valores resueltos, secretos incluidos.
+*.tfplan

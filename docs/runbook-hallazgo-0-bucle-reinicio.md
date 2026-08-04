@@ -1,21 +1,26 @@
 # Runbook — Hallazgo 0: bucle de reinicio por health check
 
-> ## Estado: RESUELTO el 2026-07-31 a las 21:30
+> ## Estado: CERRADO el 2026-07-31 a las 22:07
 >
 > **Causa real:** `curl` no existe en la imagen `eclipse-temurin:25-jre-jammy`, y el
 > health check de contenedor lo invocaba. El comando fallaba siempre.
 >
-> **Aplicado:**
-> - **Revisión 19** — health check de contenedor eliminado. El task pasó de `UNHEALTHY` a
->   `UNKNOWN` (el valor correcto cuando no hay chequeo definido) y el bucle se detuvo. La
->   supervisión queda a cargo del health check del ALB, que hace un GET HTTP real sobre
->   `/actuator/health` y también dispara el reemplazo de tasks caídos.
-> - **`Dockerfile`** — se instala `curl` en la etapa de runtime. Verificado con un build
->   local: `curl 7.81.0` presente en la imagen resultante. **Aún no desplegado**: llegará
->   con el próximo push a `main`.
+> **Secuencia aplicada:**
 >
-> **Pendiente:** una vez que el próximo despliegue publique la imagen con `curl`,
-> restaurar el health check de contenedor como revisión 20. Ver la sección final.
+> | Rev | Hora | Cambio | Resultado |
+> |---|---|---|---|
+> | 18 | 21:08 | `startPeriod` 60 → 180, `timeout` 10 → 15 | **Fallido** — el comando nunca podía tener éxito |
+> | 19 | 21:29 | Health check de contenedor eliminado | Bucle detenido; task en `UNKNOWN` |
+> | 20 | 21:55 | Despliegue de CI con la imagen que instala `curl` | `curl 7.81.0` confirmado en la imagen de producción |
+> | 21 | 22:05 | Health check restaurado (`startPeriod: 180`, `timeout: 15`) | **`healthStatus: HEALTHY`** |
+>
+> **Verificación final:** el task reporta `HEALTHY` tanto a nivel de task como de
+> contenedor —la primera vez en todo el proceso—, el target está `healthy`, y el sitio y
+> la API responden 200. El último fallo de health check en el historial del servicio es de
+> las 21:26:47, previo a la revisión 19; no ha habido ninguno después.
+>
+> El `Dockerfile` versionado instala `curl` en la etapa de runtime, así que las imágenes
+> futuras lo conservarán y el chequeo seguirá funcionando.
 >
 > **Intento fallido, registrado para no repetirlo:** la revisión 18 subió `startPeriod` de
 > 60 a 180 s y `timeout` de 10 a 15 s, sobre la teoría de que los 64 s de arranque
@@ -235,14 +240,13 @@ es que la configuración del health check no contemplaba ese tiempo.
 
 ---
 
-## PENDIENTE — Restaurar el health check tras desplegar la imagen con `curl`
+## APLICADO — Restauración del health check (revisión 21)
 
-El `Dockerfile` ya instala `curl`, pero esa imagen **solo llega a producción con el
-próximo push a `main`**. Hasta entonces, la revisión 19 corre sin health check de
-contenedor, cubierta por el del ALB.
+> Esta sección se ejecutó el 2026-07-31 a las 22:05, tras confirmar que la imagen
+> desplegada por CI ya incluía `curl`. Se conserva como referencia para futuras
+> restauraciones o para reproducir el procedimiento.
 
-Una vez que el despliegue haya publicado la imagen nueva, conviene confirmar que `curl`
-está realmente en la imagen que corre:
+Confirmar primero que `curl` está realmente en la imagen que corre:
 
 ```bash
 aws ecr get-login-password --region mx-central-1 \
@@ -294,9 +298,26 @@ Se conservan `startPeriod: 180` y `timeout: 15` de la revisión 18: aunque no er
 del bucle, los 64 s de arranque medidos dejaban muy poco margen frente a los 60 s
 originales, y ampliarlos no cuesta nada.
 
-Si el chequeo vuelve a fallar, la salida rápida es volver a la revisión 19:
+Si el chequeo vuelve a fallar, la salida rápida es volver a la revisión 20, que tiene la
+misma imagen pero sin health check de contenedor:
 
 ```bash
 aws ecs update-service --cluster biblia-cluster --service bible-references-service \
-  --task-definition bible-references-task:19
+  --task-definition bible-references-task:20
 ```
+
+## Lección para futuros health checks de contenedor
+
+El error de raíz no fue de configuración de tiempos, sino de **suponer que un binario
+existe en la imagen**. Las imágenes `-jre-` de Eclipse Temurin son mínimas: no traen
+`curl`, `wget`, `nc` ni `python3`. Antes de escribir un health check que invoque una
+herramienta externa, conviene comprobarla:
+
+```bash
+docker run --rm --entrypoint sh <imagen> -c "command -v curl || echo AUSENTE"
+```
+
+Y la señal que delató el problema, útil para diagnosticar casos parecidos: **un health
+check externo que pasa mientras el interno falla**. Si el ALB reporta el target `healthy`
+y el contenedor sale `UNHEALTHY` contra el mismo endpoint, el problema está en el
+mecanismo del chequeo, no en la aplicación.
