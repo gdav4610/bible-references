@@ -97,3 +97,15 @@ resource "aws_lb_listener_rule" "cloudfront_origin_verify" {
     }
   }
 }
+
+# ---------------------------------------------------------------------------
+# `biblia-frontend-tg` — ELIMINADO el 2026-08-04
+#
+# Era un target group huérfano (HTTP:80, target type ip, health check "/") con 0
+# targets y 0 balanceadores asociados, resto de cuando se pensó servir el
+# frontend desde el balanceador. Hoy lo sirve CloudFront desde S3.
+#
+# Se deja constancia aquí para que quien lo vea en una captura antigua de la
+# consola no lo busque: ya no existe. `bible-tg` es el único target group de la
+# cuenta.
+# ---------------------------------------------------------------------------

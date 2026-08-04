@@ -10,6 +10,14 @@ sobre el repositorio.
 **Este documento describe el estado posterior a los cambios aplicados el 2026-07-31.**
 Ver el registro de cambios más abajo.
 
+> **Revalidado y ampliado el 2026-08-04.** Se repitieron las consultas `describe-*`, se
+> ejecutó `terraform plan` y se hizo un barrido completo de objetos sin uso. El camino de
+> producción **no ha cambiado** desde el 2026-07-31 —misma revisión `:21`, misma task
+> corriendo desde las 22:05 de ese día, `healthStatus: HEALTHY`—, pero sí se aplicaron
+> cuatro cambios de higiene: ver el registro de abajo. El módulo de `terraform/` se
+> actualizó en consecuencia y sigue siendo un espejo fiel:
+> `28 to import, 0 to add, 3 to change, 0 to destroy`.
+
 ## Registro de cambios aplicados (2026-07-31)
 
 | Hora | Cambio | Recurso | Hallazgo |
@@ -26,6 +34,36 @@ Runbooks con el detalle y los procedimientos de reversión:
 
 - `runbook-hallazgo-0-bucle-reinicio.md`
 - `runbook-hallazgo-2-alb-bypass.md`
+
+## Registro de cambios aplicados (2026-08-04)
+
+Higiene, a raíz del barrido de objetos sin uso. Ninguno toca el camino de producción;
+verificado después: target `healthy` y servicio 1/1.
+
+| Hora | Cambio | Recurso | Reversible |
+|---|---|---|---|
+| 14:21 | Retención de logs a 14 días (antes: nunca expiraban) | `/ecs/bible-references` y `/ecs/biblia-frontend-task` | Sí, `put-retention-policy` |
+| ~15:0x | Lifecycle policy que conserva las **2 imágenes más recientes**; expira 16 (~2,3 GB) | ECR `bible-references` | La política sí; las imágenes borradas **no** |
+| ~15:2x | Eliminado target group huérfano | `biblia-frontend-tg` | No |
+| ~15:2x | Eliminado log group huérfano | `/ecs/biblia-frontend-task` | No |
+| ~15:4x | Eliminados 4 stacks de CloudFormation de SAM, con sus 2 Lambdas, 3 API Gateways y 3 roles | `sam-app`, `my-new-app`, `pets-service`, `aws-sam-cli-managed-default` (us-east-1) | No |
+| ~15:4x | Eliminados 2 security groups huérfanos | `biblia-sg`, `biblia-alb-sg` | No |
+| ~15:4x | Eliminadas 4 políticas IAM sin adjuntos | `testgdavpolicy`, `ListAllBuckets-test1`, 2× `AWSLambdaBasicExecutionRole-*` | No |
+
+Sobre la lifecycle policy de ECR: se validó antes con `start-lifecycle-policy-preview`
+—que no borra nada— confirmando que la imagen en producción (`0c566343…`, revisión `:21`)
+y la anterior quedan entre las conservadas. ECR evalúa las políticas de forma asíncrona,
+así que el borrado puede tardar hasta 24 h en reflejarse.
+
+Conservar solo 2 imágenes deja **un único paso de rollback**: tras dos despliegues
+seguidos, la versión de hace dos ya no existe en ECR y habría que reconstruirla desde el
+commit. Fue una decisión explícita.
+
+La retención de logs se aplicó desde la consola, fuera de Terraform, y el módulo declaraba
+`retention_in_days = 0`. Se detectó porque `terraform plan` empezó a marcar un cuarto
+cambio; se rastreó en CloudTrail y se actualizó `storage_and_secrets.tf`. Es una
+ilustración exacta del hallazgo 8: **un cambio manual no lo detecta nadie hasta que alguien
+vuelve a correr `plan`.**
 
 ## Diagrama general
 
@@ -145,7 +183,7 @@ sequenceDiagram
 |---|---|---|
 | CDN | CloudFront `E1MTT1XP2UUMYU` | Alias `escrituraclave.com` y `www`; `redirect-to-https`; inyecta `X-Origin-Verify` en el origen `Backend-API` |
 | Frontend estático | S3 `biblia-frontend-prod` | Los 4 flags de Block Public Access en `true`; policy no pública |
-| Registro de imágenes | ECR `bible-references` | Tags `:latest` y `:<git-sha>` |
+| Registro de imágenes | ECR `bible-references` | Tags `:latest` y `:<git-sha>`; lifecycle policy que conserva las 2 más recientes (desde 2026-08-04) |
 | Cluster | `biblia-cluster` | ECS |
 | Servicio | `bible-references-service` | `ACTIVE`, desired 1 / running 1, FARGATE |
 | Task definition | `bible-references-task:21` | 512 CPU / 1024 MB, `awsvpc`, health check `curl -f .../actuator/health` con `startPeriod: 180` |
@@ -159,7 +197,7 @@ sequenceDiagram
 | SG de la base de datos | `sg-050bc646783252d10` (`default`) | Ingress **5432 desde `0.0.0.0/0`** — sin resolver |
 | Subredes y rutas | `rtb-0b06ff11bb534e762` (main) | Única tabla de rutas: `0.0.0.0/0 → igw-01d6dea5b230b8bdb`; **todas las subredes son públicas** |
 | Secretos | `bible-references/db` | URL apunta a `database-2...rds.amazonaws.com:5432/bible_db` |
-| Logs | `/ecs/bible-references` | Driver `awslogs`, prefijo `ecs` |
+| Logs | `/ecs/bible-references` | Driver `awslogs`, prefijo `ecs`; retención 14 días (desde 2026-08-04). Único log group de la cuenta |
 | IAM | `ecsTaskExecutionRole` | Usado como execution role **y** como task role |
 
 ## Hallazgos
@@ -333,21 +371,108 @@ del header hace fácil confundirlo con el `Origin` que manda el navegador solo.
 > directamente, así que si estos rechazos eran escáneres deberían desaparecer del log. Es
 > una forma sencilla de despejar la duda: si siguen apareciendo, vienen del frontend.
 
-### 7. BAJO — Grupos de seguridad huérfanos
+### 7. PARCIALMENTE RESUELTO — Recursos huérfanos
 
-`biblia-sg` (`sg-06179292d0aba63da`) y `biblia-alb-sg` (`sg-097d84a75b2c197ef`) tienen
-**cero interfaces de red asociadas**; ambos abren 80/443 al mundo. Se pueden eliminar sin
-impacto.
+Un barrido completo de la cuenta el 2026-08-04 encontró varios recursos sin uso. Dos se
+eliminaron ese mismo día; el resto sigue abierto.
 
-### 8. INFORMATIVO — Infraestructura no versionada
+**Eliminados el 2026-08-04**, tras confirmar que nada los referenciaba:
 
-Nada de lo anterior —distribución de CloudFront, bucket S3, listener, reglas, target
-group, instancia RDS, subredes, grupos de seguridad— vive en el repositorio. Todo se creó
-a mano y solo se puede auditar consultando la API. Los cambios aplicados el 2026-07-31
-tampoco quedaron en código: existen en AWS y están documentados aquí y en los runbooks,
-pero nada impide que se reviertan sin dejar rastro. Llevarlo a Terraform o CDK haría que
-los hallazgos 1 y 3 fueran visibles en una revisión de código en vez de requerir una
-auditoría manual.
+| Recurso | Evidencia previa al borrado |
+|---|---|
+| Target group `biblia-frontend-tg` | 0 targets, 0 balanceadores asociados; ninguna regla del listener lo referenciaba |
+| Log group `/ecs/biblia-frontend-task` | La familia `biblia-frontend-task` tenía 0 revisiones activas; último evento en abril de 2026 |
+
+Ambos eran restos de cuando se pensó servir el frontend desde el balanceador; hoy lo sirve
+CloudFront desde S3. Tras el borrado se verificó que `bible-tg` sigue `healthy` y el
+servicio en 1/1. `bible-tg` y `/ecs/bible-references` son ahora el único target group y el
+único log group de la cuenta.
+
+**Eliminados también el 2026-08-04, en una segunda pasada:**
+
+| Recurso | Cómo |
+|---|---|
+| SGs `biblia-sg` (`sg-06179292d0aba63da`) y `biblia-alb-sg` (`sg-097d84a75b2c197ef`) | `delete-security-group`, tras confirmar 0 ENIs y 0 referencias desde reglas de otros SGs |
+| Roles `ecsTaskExecRole`, `getUsersOpen-role-lobve5u3`, `getUsersSecure-role-s844o17t` | Ya no existían al ir a borrarlos |
+| Stacks `sam-app`, `my-new-app`, `pets-service` (us-east-1) | `delete-stack` |
+| Stack `aws-sam-cli-managed-default` (us-east-1) | `delete-stack`; su bucket ya no existía |
+| Políticas `testgdavpolicy`, `ListAllBuckets-test1` y 2× `AWSLambdaBasicExecutionRole-*` | `delete-policy`, todas con 0 adjuntos |
+
+**Se borraron por stack, no recurso a recurso.** Las 2 Lambdas de `us-east-1` pertenecían a
+stacks de CloudFormation de SAM (2024), y con ellas venían recursos que el primer barrido
+no había encontrado: **3 API Gateways** (`z50n53vqpk` y `mkm44gg4aj` REST, `gusjzecqk4`
+HTTP) con sus stages `Prod`/`$default` desplegados, más los roles IAM y los permisos de
+invocación. Borrar los Lambdas sueltos habría dejado los stacks en estado inconsistente y
+los API Gateways vivos —endpoints públicos— sin que nadie los echara de menos.
+
+Estado resultante, verificado: **1 rol** (`ecsTaskExecutionRole`), **1 política**
+(`biblia-frontend-deploy-policy`), **3 security groups** (todos en uso), y en `us-east-1`
+**0** stacks, **0** Lambdas y **0** API Gateways. Producción intacta: servicio 1/1, target
+`healthy` y `https://escrituraclave.com/api/bible/chapter/1/1` respondiendo 200.
+
+**Pendiente, requiere credenciales root:**
+
+| Recurso | Bloqueo |
+|---|---|
+| Bucket `testbucketfordataassessments` (us-east-1, 4,7 KB) | Su propia bucket policy lo impide |
+
+La policy (`AWSConsole-AccessLogs-Policy`, de octubre de 2017) es un `Deny` sobre
+`Principal: "*"` que **incluye `s3:DeleteBucketPolicy`**, con excepción únicamente para
+principals cuyo ARN contenga `797873946194` —una cuenta de AWS ajena, probablemente de
+algún proveedor de auditoría— o para peticiones desde una lista fija de IPs de 2017. El
+usuario `gdgr` no cumple ninguna de las dos, así que ni puede vaciar el bucket ni retirar
+la policy.
+
+Un `Deny` explícito en una bucket policy no se puede sortear con permisos de IAM. La única
+salida es el salvaguarda de AWS contra el bloqueo permanente: **el usuario root de la
+cuenta propietaria siempre conserva `s3:DeleteBucketPolicy`.** Entrando como root:
+
+```bash
+aws s3api delete-bucket-policy --bucket testbucketfordataassessments
+aws s3 rm s3://testbucketfordataassessments --recursive
+aws s3api delete-bucket --bucket testbucketfordataassessments --region us-east-1
+```
+
+Cuesta céntimos al mes, así que no corre prisa; lo que sí conviene revisar es **por qué una
+cuenta ajena tuvo acceso concedido a un bucket de esta cuenta**.
+
+> **Lo que el barrido confirmó que está limpio:** 0 volúmenes EBS sueltos, 0 Elastic IPs
+> sin asociar, 0 ENIs disponibles, 0 instancias EC2, 0 snapshots manuales, 0 AMIs, 0 NAT
+> gateways, 0 VPC endpoints, 0 hosted zones en Route53. El barrido por **todas** las
+> regiones confirma que no hay nada facturable fuera de `mx-central-1`. La alarma de
+> facturación funciona y tiene suscripción confirmada.
+
+### 8. PARCIALMENTE RESUELTO — Infraestructura versionada pero no adoptada
+
+Toda la infraestructura descrita aquí está ahora declarada en `terraform/`. El módulo
+**describe el estado real, no una versión mejorada de él**: los hallazgos 1, 3, 4 y 5
+quedan escritos tal como están, con comentarios que explican qué falla y cómo se corrige,
+para que `plan` no proponga cambios. Verificado el 2026-08-04:
+
+```
+Plan: 27 to import, 0 to add, 3 to change, 0 to destroy.
+```
+
+Los 3 cambios son cosméticos y no corresponden a diferencias reales con AWS; están
+explicados en `terraform/README.md`.
+
+**Lo que falta: nunca se ha ejecutado `terraform apply`.** No existe archivo de state, así
+que hoy el módulo es documentación ejecutable, no la fuente de verdad:
+
+- AWS sigue siendo la única autoridad sobre lo que está desplegado.
+- Un cambio hecho a mano en la consola no lo detecta nadie hasta que alguien vuelva a
+  correr `plan`.
+- Los 27 bloques `import` de `imports.tf` siguen siendo necesarios; solo se pueden borrar
+  después del primer `apply`.
+
+Además, `.github/workflows/aws-dep.yml` sobrescribe la task definition en cada push
+(`aws ecs describe-task-definition > task-definition.json`), de modo que el pipeline y
+Terraform compiten por ese recurso. El módulo lo evita hoy con `ignore_changes`, que es un
+parche. Ver el apartado correspondiente de `terraform/README.md`.
+
+Siguiente paso: adoptar el state (`apply` de los imports, que no toca nada en AWS) y
+mover el state a un backend S3 cifrado —contiene el header secreto de CloudFront en
+claro—. Hay un ejemplo comentado en `terraform/versions.tf`.
 
 ## Lo que sí está bien configurado
 
@@ -410,8 +535,13 @@ aws elbv2 modify-listener                  # acción por defecto a 403
 ## Trabajo pendiente, por prioridad
 
 1. **Hallazgo 1** — cerrar el acceso a RDS desde internet. Único crítico abierto.
-2. **Hallazgo 3** — deletion protection y retención de backups en RDS.
-3. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
-4. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
-5. **Hallazgos 4, 5, 6, 7** — Hazelcast, separación de roles IAM, OIDC, limpieza de SGs.
-6. **Hallazgo 8** — llevar la infraestructura a código.
+2. **Hallazgo 8** — adoptar el state de Terraform y moverlo a un backend cifrado. Barato
+   (el `apply` de los imports no toca AWS) y desbloquea que los demás hallazgos se
+   corrijan por código en vez de a mano.
+3. **Hallazgo 3** — deletion protection y retención de backups en RDS.
+4. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
+5. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
+6. **Hallazgos 4, 5, 6** — Hazelcast, separación de roles IAM, OIDC.
+7. **Hallazgo 7** — solo queda el bucket `testbucketfordataassessments`, que exige
+   credenciales root. Céntimos al mes; lo relevante es entender por qué una cuenta ajena
+   tenía acceso concedido.

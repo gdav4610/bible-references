@@ -97,12 +97,15 @@ resource "aws_default_security_group" "default" {
 }
 
 # ---------------------------------------------------------------------------
-# Grupos huérfanos, deliberadamente NO gestionados
+# Grupos huérfanos — ELIMINADOS el 2026-08-04
 #
-#   biblia-sg      sg-06179292d0aba63da   0 interfaces de red
-#   biblia-alb-sg  sg-097d84a75b2c197ef   0 interfaces de red
+#   biblia-sg      sg-06179292d0aba63da
+#   biblia-alb-sg  sg-097d84a75b2c197ef
 #
-# Ambos abren 80/443 al mundo y no están asociados a nada (hallazgo 7). No se
-# importan a propósito: el objetivo es eliminarlos, no adoptarlos. Borrarlos con
-# `aws ec2 delete-security-group` y luego confirmar que nada los referencia.
+# Ambos abrían 80/443 al mundo sin estar asociados a nada (hallazgo 7). Se
+# borraron tras confirmar 0 interfaces de red y 0 referencias desde reglas de
+# otros grupos.
+#
+# Los tres que quedan en la VPC —bible-alb-sg, bible-ecs-sg y el `default`— son
+# los declarados arriba, todos en uso.
 # ---------------------------------------------------------------------------

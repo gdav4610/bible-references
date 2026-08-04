@@ -20,16 +20,20 @@ resource "aws_secretsmanager_secret" "db" {
 # ---------------------------------------------------------------------------
 # Logs
 #
-# Sin política de retención: los logs no expiran nunca y se facturan para
-# siempre. Con el bucle de reinicio del hallazgo 0 este grupo acumuló ~58 flujos
-# en unas horas. Poner `retention_in_days` (30 o 90) es un cambio de una línea,
-# pero se deja como está porque este módulo refleja el estado actual.
+# Retención de 14 días, aplicada a mano desde la consola el 2026-08-04 (usuario
+# `gdgr`, confirmado en CloudTrail). Antes no expiraban nunca y se facturaban
+# para siempre; con el bucle de reinicio del hallazgo 0 este grupo llegó a
+# acumular ~58 flujos en unas horas.
+#
+# `/ecs/biblia-frontend-task` se eliminó el 2026-08-04: era un grupo huérfano de
+# una familia de tasks sin revisiones activas, con su último evento en abril.
+# `/ecs/bible-references` es hoy el único log group de la cuenta.
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/bible-references"
   log_group_class   = "STANDARD"
-  retention_in_days = 0 # 0 = nunca expira
+  retention_in_days = 14
 }
 
 # ---------------------------------------------------------------------------

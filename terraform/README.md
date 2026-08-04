@@ -132,7 +132,7 @@ contenedor del secreto, no su contenido.
 | Certificado ACM (us-east-1) | No hay hosted zone en Route53; el DNS es externo y Terraform no puede crear los registros de validación |
 | WAF WebACL | Creada desde la consola de CloudFront; se referencia por ARN para no perder la asociación |
 | VPC, subredes, tabla de rutas | Son recursos de la cuenta, no del proyecto |
-| `biblia-sg`, `biblia-alb-sg` | Huérfanos (0 interfaces). El objetivo es borrarlos, no adoptarlos |
+| ~~`biblia-sg`, `biblia-alb-sg`~~ | Eliminados el 2026-08-04 (hallazgo 7); ya no existen |
 | Versión del secreto de BD | Contiene la contraseña |
 
 ## Estructura

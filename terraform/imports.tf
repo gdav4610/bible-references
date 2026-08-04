@@ -102,6 +102,11 @@ import {
   id = "bible-references"
 }
 
+import {
+  to = aws_ecr_lifecycle_policy.app
+  id = "bible-references"
+}
+
 # --- IAM -------------------------------------------------------------------
 
 import {
@@ -172,6 +177,7 @@ import {
 #   WAF WebACL                    creada desde la consola de CloudFront; se
 #                                 referencia por ARN para no perder la asociación
 #   VPC, subredes, tabla de rutas recursos de la cuenta, no del proyecto
-#   biblia-sg, biblia-alb-sg      huérfanos, el objetivo es borrarlos (hallazgo 7)
+#                                 (biblia-sg y biblia-alb-sg ya no aparecen aquí:
+#                                 se eliminaron el 2026-08-04, hallazgo 7)
 #   Versión del secreto de BD     contiene la contraseña; no debe entrar al state
 # ---------------------------------------------------------------------------
