@@ -2,7 +2,7 @@
 
 Cuenta: `274869222183` · Región: `mx-central-1` (México) · VPC: `vpc-0a224eceeb1c0720a`
 
-Topología **verificada contra la infraestructura real** el 2026-07-31 mediante comandos
+Topología **verificada contra la infraestructura real** el 2026-07-31 mediante comandos 
 `describe-*` de la AWS CLI (identidad `arn:aws:iam::274869222183:user/gdgr`). Los nombres
 de recursos, IDs, reglas de red y rutas provienen de la API de AWS, no de inferencias
 sobre el repositorio.
@@ -201,6 +201,30 @@ sequenceDiagram
 | IAM | `ecsTaskExecutionRole` | Usado como execution role **y** como task role |
 
 ## Hallazgos
+
+Estado al 2026-08-04. Los hallazgos 9 a 12 salieron del barrido de objetos sin uso de ese
+día y no existían en la revisión del 2026-07-31.
+
+| # | Estado | Hallazgo |
+|---|---|---|
+| 0 | ✅ RESUELTO | Bucle de reinicio: `curl` ausente en la imagen |
+| **1** | 🔴 **ABIERTO — CRÍTICO** | **La base de datos acepta 5432 desde `0.0.0.0/0`** |
+| 2 | ✅ RESUELTO | El ALB era alcanzable saltándose CloudFront |
+| 3 | 🟡 ABIERTO — medio | RDS single-AZ, backup 1 día, sin deletion protection |
+| 4 | 🟡 ABIERTO — medio | Hazelcast con multicast, no funciona en VPC |
+| 5 | 🟡 ABIERTO — medio | `taskRole` = `executionRole`, con `SecretsManagerReadWrite` |
+| 6 | 🟡 ABIERTO — medio | Llaves estáticas en GitHub Actions en vez de OIDC |
+| 6b | ❔ POR CONFIRMAR | Rechazos de `OriginValidationFilter` sobre rutas legítimas |
+| 7 | 🔵 PARCIAL | Recursos huérfanos — solo queda el bucket, exige root |
+| 8 | 🔵 PARCIAL | Infraestructura versionada en `terraform/` pero **sin adoptar** |
+| 9 | 🟡 ABIERTO — medio | Llaves de acceso de larga vida, una sin usar desde 2025 |
+| 10 | ❔ POR REVISAR | Una cuenta de AWS **ajena** tiene acceso concedido a un bucket |
+| 11 | ℹ️ INFORMATIVO | El cluster de ECS lo gestiona CloudFormation, no la consola |
+| 12 | ✅ RESUELTO | ECR sin caducidad de imágenes y logs sin retención |
+
+Prioridad real: **el único crítico sigue siendo el 1**. El 8 va inmediatamente después no
+por gravedad propia, sino porque adoptar el state es lo que permite corregir los demás por
+código en vez de a mano.
 
 ### 0. RESUELTO — Bucle de reinicio del servicio
 
@@ -450,7 +474,7 @@ quedan escritos tal como están, con comentarios que explican qué falla y cómo
 para que `plan` no proponga cambios. Verificado el 2026-08-04:
 
 ```
-Plan: 27 to import, 0 to add, 3 to change, 0 to destroy.
+Plan: 28 to import, 0 to add, 3 to change, 0 to destroy.
 ```
 
 Los 3 cambios son cosméticos y no corresponden a diferencias reales con AWS; están
@@ -462,7 +486,7 @@ que hoy el módulo es documentación ejecutable, no la fuente de verdad:
 - AWS sigue siendo la única autoridad sobre lo que está desplegado.
 - Un cambio hecho a mano en la consola no lo detecta nadie hasta que alguien vuelva a
   correr `plan`.
-- Los 27 bloques `import` de `imports.tf` siguen siendo necesarios; solo se pueden borrar
+- Los 28 bloques `import` de `imports.tf` siguen siendo necesarios; solo se pueden borrar
   después del primer `apply`.
 
 Además, `.github/workflows/aws-dep.yml` sobrescribe la task definition en cada push
@@ -473,6 +497,83 @@ parche. Ver el apartado correspondiente de `terraform/README.md`.
 Siguiente paso: adoptar el state (`apply` de los imports, que no toca nada en AWS) y
 mover el state a un backend S3 cifrado —contiene el header secreto de CloudFront en
 claro—. Hay un ejemplo comentado en `terraform/versions.tf`.
+
+### 9. MEDIO — Llaves de acceso de larga vida, algunas sin usar
+
+Complementa el hallazgo 6: además de que GitHub Actions use llaves estáticas, las tres que
+existen en la cuenta son credenciales de larga vida sin rotación. Verificado el 2026-08-04
+con `get-access-key-last-used`:
+
+| Usuario | Llave creada | Último uso | Comentario |
+|---|---|---|---|
+| `gdgr` | 2021-08-27 | **2025-07-18** | 5 años de antigüedad y más de uno sin usarse. Es el usuario humano con permisos amplios |
+| `github-actions-biblia-frontend` | 2026-04-08 | 2026-04-28 | ~3 meses parada; sugiere que ese pipeline dejó de correr |
+| `github-actions-biblia` | 2026-04-07 | 2026-08-01 | En uso activo; es la del workflow de despliegue |
+
+La de `gdgr` es la más relevante: una llave de acceso programático de un usuario humano,
+sin usar en más de un año, es superficie de ataque pura. Si no hace falta, desactivarla
+(`update-access-key --status Inactive`) y borrarla tras confirmar que nada se rompe. Para
+el uso interactivo está `aws login`, que ya se usa en esta cuenta.
+
+La de `github-actions-biblia-frontend` conviene resolverla junto con el hallazgo 6: o el
+pipeline vuelve a usarse y migra a OIDC, o el usuario y su llave sobran.
+
+### 10. POR REVISAR — Una cuenta de AWS ajena tiene acceso concedido a un bucket
+
+El bucket `testbucketfordataassessments` (us-east-1, 4,7 KB) tiene una bucket policy de
+octubre de 2017 (`AWSConsole-AccessLogs-Policy-1508951545812`) que deniega el acceso a
+`Principal: "*"` **salvo** que se cumpla una de dos excepciones:
+
+- que el ARN del principal contenga `797873946194` — **una cuenta de AWS que no es esta**
+- o que la petición venga de una lista fija de IPs de 2017
+
+El efecto práctico hoy es doble. Por un lado el propietario legítimo **no puede** vaciar ni
+borrar el bucket, porque el `Deny` incluye `s3:DeleteBucketPolicy` y un deny explícito de
+bucket policy no se sortea con permisos de IAM. Por otro, una cuenta de terceros conserva
+sobre el papel un acceso concedido hace ocho años.
+
+No se ha podido determinar a quién pertenece esa cuenta; el nombre del bucket y el de la
+policy apuntan a alguna herramienta de evaluación o auditoría contratada entonces. Antes de
+borrarlo conviene entender de dónde salió, porque si hubo más recursos con el mismo patrón
+puede que queden otros permisos cruzados sin inventariar.
+
+Para eliminarlo hace falta el usuario **root** de la cuenta, que es el único que conserva
+`s3:DeleteBucketPolicy` frente a un deny así (salvaguarda de AWS contra el bloqueo
+permanente):
+
+```bash
+aws s3api delete-bucket-policy --bucket testbucketfordataassessments
+aws s3 rm s3://testbucketfordataassessments --recursive
+aws s3api delete-bucket --bucket testbucketfordataassessments --region us-east-1
+```
+
+### 11. INFORMATIVO — El cluster de ECS lo gestiona CloudFormation
+
+`biblia-cluster` no se creó a mano: pertenece al stack
+`Infra-ECS-Cluster-biblia-cluster-7dad23f7` (mx-central-1), que lo declara como su único
+recurso. Se descubrió al inventariar los stacks durante la limpieza del hallazgo 7.
+
+Importa por el hallazgo 8: cuando se adopte el state, Terraform importará un recurso que
+**otro gestor ya considera suyo**. No rompe nada de inmediato —el stack no se toca—, pero
+deja dos sistemas con autoridad sobre el mismo cluster, igual que ya ocurre entre Terraform
+y el pipeline con la task definition. Lo limpio sería eliminar el stack conservando el
+cluster (`delete-stack` con `--retain-resources`) antes de adoptar, o dejar el cluster
+fuera del módulo.
+
+Matiz importante: **este stack no es un huérfano y no debe borrarse sin más.** Un
+`delete-stack` normal se llevaría por delante el cluster de producción.
+
+### 12. RESUELTO — ECR sin caducidad de imágenes y logs sin retención
+
+El repositorio de ECR no tenía lifecycle policy: el pipeline etiqueta cada build con el SHA
+del commit y además mueve `latest`, así que acumulaba una imagen por push sin que nada las
+expirara. Había llegado a **18 imágenes y 2,87 GB**. Los dos log groups tampoco tenían
+retención, de modo que se facturaban para siempre.
+
+Ambos corregidos el 2026-08-04 (ver el registro de cambios): retención de 14 días en los
+logs, y una lifecycle policy que conserva las 2 imágenes más recientes. Detalles y matices
+—entre ellos que conservar 2 deja un único paso de rollback— en el registro de cambios y en
+`terraform/ecr.tf`.
 
 ## Lo que sí está bien configurado
 
@@ -526,6 +627,22 @@ aws elbv2 create-rule                      # regla de prioridad 1
 aws elbv2 modify-listener                  # acción por defecto a 403
 ```
 
+Añadidos el 2026-08-04, todos en el registro de cambios de ese día:
+
+```bash
+aws logs put-retention-policy              # 14 días en ambos log groups
+aws ecr put-lifecycle-policy               # conservar las 2 imágenes más recientes
+aws elbv2 delete-target-group              # biblia-frontend-tg
+aws logs delete-log-group                  # /ecs/biblia-frontend-task
+aws cloudformation delete-stack            # 4 stacks de SAM en us-east-1
+aws ec2 delete-security-group              # biblia-sg, biblia-alb-sg
+aws iam delete-policy                      # 4 políticas sin adjuntos
+```
+
+Antes de aplicar la lifecycle policy de ECR se usó `aws ecr start-lifecycle-policy-preview`,
+que simula la regla sin borrar nada. Es el comando que conviene tener a mano al tocar
+políticas de expiración: confirma exactamente qué imágenes sobreviven.
+
 > Sobre el entorno de trabajo: la AWS CLI en Windows falla con
 > `'charmap' codec can't encode character` al leer logs con emoji; se soluciona con
 > `PYTHONUTF8=1`. Git Bash convierte rutas como `/ecs/bible-references` en rutas de
@@ -537,11 +654,15 @@ aws elbv2 modify-listener                  # acción por defecto a 403
 1. **Hallazgo 1** — cerrar el acceso a RDS desde internet. Único crítico abierto.
 2. **Hallazgo 8** — adoptar el state de Terraform y moverlo a un backend cifrado. Barato
    (el `apply` de los imports no toca AWS) y desbloquea que los demás hallazgos se
-   corrijan por código en vez de a mano.
-3. **Hallazgo 3** — deletion protection y retención de backups en RDS.
-4. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
-5. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
-6. **Hallazgos 4, 5, 6** — Hazelcast, separación de roles IAM, OIDC.
-7. **Hallazgo 7** — solo queda el bucket `testbucketfordataassessments`, que exige
-   credenciales root. Céntimos al mes; lo relevante es entender por qué una cuenta ajena
-   tenía acceso concedido.
+   corrijan por código en vez de a mano. Resolver de paso el **hallazgo 11**, para no
+   adoptar un cluster que CloudFormation ya considera suyo.
+3. **Hallazgo 9** — desactivar la llave de acceso de `gdgr`, sin usar desde julio de 2025.
+   Es un comando y no rompe nada mientras `aws login` siga funcionando.
+4. **Hallazgo 3** — deletion protection y retención de backups en RDS.
+5. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
+6. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
+7. **Hallazgos 4, 5, 6** — Hazelcast, separación de roles IAM, OIDC. El 6 se resuelve junto
+   con la llave sobrante de `github-actions-biblia-frontend` (hallazgo 9).
+8. **Hallazgos 7 y 10** — el bucket `testbucketfordataassessments`, que exige credenciales
+   root. Céntimos al mes; lo relevante no es borrarlo sino entender por qué la cuenta
+   `797873946194` tenía acceso concedido.
