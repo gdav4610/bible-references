@@ -30,8 +30,17 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
   cache:
-    type: hazelcast
+    type: caffeine
     cache-names: verses, sourceWords, compoundWords, keywordCounts, compoundWordCounts, keywordTranslatedCounts, compoundTranslatedCounts, keywordTransliteratedWord, compoundTransliteratedWord
+    caffeine:
+      # expireAfterWrite=24h conserva el TTL que hazelcast.yaml aplicaba al mapa
+      # `verses`. Aquí rige para todas las cachés: los datos de referencia no
+      # cambian, así que expirar de más solo cuesta una consulta.
+      # maximumSize es un tope de seguridad, no un límite operativo: lo que entra
+      # en caché ya lo restringen VerseCacheCondition y WordCacheCondition desde
+      # las condiciones SpEL de @Cacheable. Importa porque la caché vive en la
+      # memoria del proceso y Hazelcast no imponía ningún límite.
+      spec: maximumSize=500,expireAfterWrite=24h
 
 # Dominio del frontend (CloudFront). Reemplazar por su dominio, por ejemplo: https://d123.cloudfront.net
 app:

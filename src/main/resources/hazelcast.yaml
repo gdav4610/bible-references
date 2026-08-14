@@ -1,8 +1,0 @@
-hazelcast:
-  network:
-    join:
-      multicast:
-        enabled: true
-  map:
-    verses:
-      time-to-live-seconds: 86400  # 24 hours

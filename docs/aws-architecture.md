@@ -279,7 +279,7 @@ día y no existían en la revisión del 2026-07-31.
 | 1 | ✅ RESUELTO | La base de datos aceptaba 5432 desde `0.0.0.0/0` — cerrado el 2026-08-13 |
 | 2 | ✅ RESUELTO | El ALB era alcanzable saltándose CloudFront |
 | 3 | 🟡 ABIERTO — medio | RDS single-AZ, backup 1 día, sin deletion protection |
-| 4 | 🟡 ABIERTO — medio | Hazelcast con multicast, no funciona en VPC |
+| 4 | 🔵 RESUELTO EN CÓDIGO | Hazelcast con multicast, no funciona en VPC — sustituido por Caffeine el 2026-08-13, **pendiente de desplegar** |
 | 5 | 🟡 ABIERTO — medio | `taskRole` = `executionRole`, con `SecretsManagerReadWrite` |
 | 6 | 🟡 ABIERTO — medio | Llaves estáticas en GitHub Actions en vez de OIDC |
 | 6b | ❔ POR CONFIRMAR | Rechazos de `OriginValidationFilter` sobre rutas legítimas |
@@ -430,13 +430,42 @@ de zona, o un `delete-db-instance` accidental, implica caída e incluso pérdida
 Como mínimo: activar deletion protection, subir la retención de backups y considerar
 Multi-AZ. Subir el desired count a 2 exige antes resolver el punto 4.
 
-### 4. MEDIO — Hazelcast usa descubrimiento por multicast
+### 4. RESUELTO EN CÓDIGO — Hazelcast usaba descubrimiento por multicast
 
-`hazelcast.yaml` declara `multicast: enabled: true`, y el multicast no funciona dentro de
-una VPC de AWS, Fargate `awsvpc` incluido. Con la única task actual nada falla, pero al
-escalar cada instancia tendrá su propia caché aislada y servirán datos divergentes. Para
-clustering real hace falta el discovery de `hazelcast-aws` (por ECS o por tags), o mover
-la caché a ElastiCache.
+`hazelcast.yaml` declaraba `multicast: enabled: true`, y el multicast no funciona dentro de
+una VPC de AWS, Fargate `awsvpc` incluido. Con una sola task nada fallaba, pero al escalar
+cada instancia habría tenido su propia caché aislada sirviendo datos divergentes: toda la
+complejidad de una caché distribuida sin ninguna de sus ventajas.
+
+**Sustituido por Caffeine el 2026-08-13.** Al inspeccionar el uso real resultó que Hazelcast
+se usaba **únicamente como `CacheManager` detrás de `@Cacheable`** —sin `IMap`, sin locks ni
+pub/sub—, así que fue un reemplazo directo: las 9 anotaciones `@Cacheable` de los
+repositorios no se tocaron.
+
+| Cambio | Detalle |
+|---|---|
+| `pom.xml` | Fuera `hazelcast` y `hazelcast-spring` 5.5.0; dentro `caffeine` (versión del BOM) |
+| Borrados | `config/HazelcastConfig.java` y `resources/hazelcast.yaml` |
+| `application.yaml` | `spring.cache.type: caffeine` + `spec: maximumSize=500,expireAfterWrite=24h` |
+
+El `expireAfterWrite=24h` conserva el TTL que `hazelcast.yaml` aplicaba al mapa `verses`.
+El `maximumSize` es nuevo: Hazelcast no imponía ningún límite y la caché vive en la memoria
+del proceso. En la práctica no se alcanzará, porque lo que entra en caché ya lo restringen
+`VerseCacheCondition` y `WordCacheCondition` desde las condiciones SpEL.
+
+Efecto colateral útil para la migración a Lambda: **el JAR pasó de 75 MB a 59 MB**, un 21%
+menos.
+
+> **Se hizo primero porque es el único trabajo de C2 que vale por sí solo:** se despliega en
+> la infraestructura actual, cierra este hallazgo y no se tira aunque la migración a Lambda
+> se abandone.
+
+**Cubierto por `CacheConfigurationTest`**, que carga el `application.yaml` real mediante
+`ConfigDataApplicationContextInitializer`. Existía un vacío real: `BibleReferencesApplicationTests`
+tiene su `contextLoads` **comentado**, así que el contexto de Spring nunca se levantaba en la
+suite, y las pruebas de servicio son unitarias con Mockito. El build habría pasado en verde
+con la caché rota. Conviene descomentar ese `contextLoads` en algún momento, aunque exige
+resolver de qué base de datos tira la prueba.
 
 ### 5. MEDIO — El task role y el execution role son el mismo
 

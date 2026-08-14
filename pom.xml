@@ -93,20 +93,20 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Hazelcast for distributed caching -->
+        <!-- 🗃️ Caché local en proceso.
+             Sustituye a Hazelcast desde 2026-08-13. Hazelcast se descubría por
+             multicast, que no funciona dentro de una VPC de AWS (hallazgo 4), de modo
+             que cada instancia mantenía su propia caché aislada: toda la complejidad
+             de un caché distribuido sin ninguna de sus ventajas.
+             Se usaba únicamente como CacheManager detrás de @Cacheable —sin IMap, sin
+             locks ni pub/sub—, así que Caffeine es un reemplazo directo. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-cache</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.hazelcast</groupId>
-            <artifactId>hazelcast</artifactId>
-            <version>5.5.0</version>
-        </dependency>
-        <dependency>
-            <groupId>com.hazelcast</groupId>
-            <artifactId>hazelcast-spring</artifactId>
-            <version>5.5.0</version>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
         </dependency>
 
 
