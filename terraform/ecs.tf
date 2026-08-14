@@ -8,9 +8,13 @@ resource "aws_ecs_cluster" "main" {
   }
 }
 
+# FARGATE_SPOT añadido el 2026-08-13 para bajar costes. Se dejan los dos
+# declarados: el servicio corre en Spot, pero mantener FARGATE disponible
+# permite volver a on-demand con un solo `update-service` si Spot resulta
+# demasiado inestable.
 resource "aws_ecs_cluster_capacity_providers" "main" {
   cluster_name       = aws_ecs_cluster.main.name
-  capacity_providers = ["FARGATE"]
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 }
 
 # ---------------------------------------------------------------------------
@@ -35,6 +39,27 @@ resource "aws_ecs_task_definition" "app" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = "512"
   memory                   = "1024"
+
+  # ARM64 — PREPARADO PERO NO APLICADO (2026-08-13)
+  #
+  # Fargate en Graviton cuesta ~20% menos que en x86. El `Dockerfile` y el
+  # workflow YA construyen para linux/arm64, pero la revisión desplegada sigue
+  # siendo x86, así que este bloque queda comentado para que el módulo siga
+  # reflejando la realidad.
+  #
+  # Con Fargate Spot ya aplicado, el ahorro adicional de ARM64 baja a ~1,44
+  # USD/mes: el 20% se calcula sobre una base ya descontada al 30%. Por eso dejó
+  # de ser prioritario.
+  #
+  # Al activarlo, descomentar este bloque Y asegurarse de que la imagen arm64
+  # está en ECR ANTES de registrar la revisión. Una imagen x86 sobre
+  # runtimePlatform ARM64 —o al revés— no arranca (`exec format error`).
+  # Procedimiento en docs/runbook-ahorro-costos.md, punto 3.
+  #
+  # runtime_platform {
+  #   operating_system_family = "LINUX"
+  #   cpu_architecture        = "ARM64"
+  # }
 
   # Ambos apuntan al mismo rol: hallazgo 5, sin resolver.
   execution_role_arn = aws_iam_role.ecs_task_execution.arn
@@ -101,6 +126,18 @@ resource "aws_ecs_task_definition" "app" {
 # desired_count = 1 (hallazgo 3). Subirlo exige antes resolver el hallazgo 4:
 # Hazelcast usa descubrimiento por multicast, que no funciona en una VPC, así
 # que cada task tendría su propia caché aislada.
+#
+# FARGATE_SPOT desde el 2026-08-13: hasta un 70% más barato que on-demand. El
+# precio es que AWS puede reclamar la capacidad con 2 minutos de aviso; con una
+# sola task y un arranque de ~64 s, cada interrupción son ~2 minutos de 503.
+# Es una compensación aceptada a la vista del tráfico (pocos usuarios de día,
+# ninguno de noche). Para volver a on-demand, cambiar el capacity provider a
+# FARGATE y forzar un despliegue nuevo.
+#
+# desired_count queda a 1 pero lo pisa el apagado nocturno: EventBridge
+# Scheduler lo baja a 0 a la 01:00 y lo sube a 1 a las 06:55, hora de Ciudad de
+# México (ver scheduler.tf). De ahí el ignore_changes de abajo: sin él, cualquier
+# `apply` que corriera de madrugada volvería a levantar el servicio.
 # ---------------------------------------------------------------------------
 
 resource "aws_ecs_service" "app" {
@@ -108,8 +145,13 @@ resource "aws_ecs_service" "app" {
   cluster          = aws_ecs_cluster.main.id
   task_definition  = aws_ecs_task_definition.app.arn
   desired_count    = 1
-  launch_type      = "FARGATE"
   platform_version = "LATEST"
+
+  capacity_provider_strategy {
+    capacity_provider = "FARGATE_SPOT"
+    weight            = 1
+    base              = 0
+  }
 
   scheduling_strategy                = "REPLICA"
   deployment_maximum_percent         = 200
@@ -138,7 +180,9 @@ resource "aws_ecs_service" "app" {
   depends_on = [aws_lb_listener.http]
 
   lifecycle {
-    # Cada push a main despliega una revisión nueva desde GitHub Actions.
-    ignore_changes = [task_definition]
+    # Cada push a main despliega una revisión nueva desde GitHub Actions, y el
+    # apagado nocturno mueve desired_count entre 0 y 1. Terraform no debe
+    # revertir ninguna de las dos cosas.
+    ignore_changes = [task_definition, desired_count]
   }
 }

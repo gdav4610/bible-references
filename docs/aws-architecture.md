@@ -34,6 +34,7 @@ Runbooks con el detalle y los procedimientos de reversión:
 
 - `runbook-hallazgo-0-bucle-reinicio.md`
 - `runbook-hallazgo-2-alb-bypass.md`
+- `runbook-ahorro-costos.md` — preparado el 2026-08-13, **sin aplicar**
 
 ## Registro de cambios aplicados (2026-08-04)
 
@@ -65,6 +66,68 @@ cambio; se rastreó en CloudTrail y se actualizó `storage_and_secrets.tf`. Es u
 ilustración exacta del hallazgo 8: **un cambio manual no lo detecta nadie hasta que alguien
 vuelve a correr `plan`.**
 
+## Registro de cambios aplicados (2026-08-13) — reducción de costes
+
+Motivación: pocos usuarios de día, ninguno de noche, y una factura que no dependía del
+tráfico. Detalle, verificación y reversión en **`runbook-ahorro-costos.md`**.
+
+### De dónde salía la factura
+
+Julio de 2026, cifras **reales de Cost Explorer** por `USAGE_TYPE`, antes de impuestos:
+
+| Partida | USD | % |
+|---|---|---|
+| `MXC1-Fargate-vCPU-Hours` + `GB-Hours` | 23,97 | 32% |
+| `MXC1-LoadBalancerUsage` (ALB, tarifa base) | 17,58 | 24% |
+| `MXC1-PublicIPv4:InUseAddress` (5 direcciones) | 17,34 | 23% |
+| `MXC1-InstanceUsage:db.t4g.micro` | 12,65 | 17% |
+| `MXC1-RDS:GP2-Storage` | 2,42 | 3% |
+| Secrets Manager, ECR, S3 | 0,58 | 1% |
+| **Total sin impuestos** | **74,53** | |
+| Impuestos | 11,92 | |
+| **Total** | **86,45** | |
+
+Dos hallazgos que solo aparecen al desglosar por tipo de uso:
+
+- **`MXC1-LCUUsage` = 0,0018 USD.** El balanceador no procesa prácticamente nada. Los 17,58
+  USD son tarifa base pura: cuesta lo mismo servir un puñado de peticiones que ninguna.
+- **Las IPv4 públicas son 5, no 4:** el ALB ocupa **tres** subredes, más la task de Fargate
+  y RDS. A 0,005 USD/hora salen 17,34 USD/mes, casi tanto como el balanceador.
+
+Sumadas, ALB e IPv4 eran **47% de la factura** en fontanería de red para una aplicación sin
+tráfico medible.
+
+### Lo aplicado
+
+| # | Cambio | Ahorro/mes | Estado |
+|---|---|---|---|
+| 1 | RDS sin IP pública, con `bible-rds-sg` dedicado | 3,47 | ✅ aplicado 17:40 |
+| 2 | Servicio ECS a `FARGATE_SPOT` | ~16,80 | ✅ aplicado 17:33 |
+| 4 | Apagado nocturno de ECS y RDS (01:00–06:55) | ~5,47 | ✅ schedules creados 17:31 |
+| 3 | Imagen y task definition a ARM64 | ~1,44 | ⏸️ preparado, **sin aplicar** |
+
+Ahorro aplicado: **~25,7 USD/mes sin impuestos**, de 74,53 a ~48,8 (~56,6 con impuestos).
+Alrededor de un tercio.
+
+El cambio 2 se hizo sin corte: `deploymentMinimumHealthyPercent` es 100, así que ECS
+levantó la task de Spot y solo entonces drenó la anterior. El cambio 1 tardó 30 segundos en
+`modifying` y la aplicación siguió respondiendo 200 durante toda la operación.
+
+**El cambio 3 se descartó a propósito.** Con Spot ya aplicado su ahorro cae de ~4 a ~1,44
+USD/mes —el 20% de Graviton se calcula sobre una base ya descontada un 70%— y a cambio
+arrastra una trampa de orden: una imagen x86 sobre `runtimePlatform: ARM64`, o al revés, no
+arranca (`exec format error`). Diecisiete dólares al año no compensan meter QEMU en el
+pipeline. **El repositorio quedó íntegramente en x86**: se escribieron los cambios del
+`Dockerfile` y del workflow y se revirtieron, y el bloque `runtime_platform` está comentado
+en `ecs.tf`. El procedimiento completo se conserva en el runbook por si algún día compensa.
+
+### Lo que sigue sin resolver
+
+Tras estos cambios, la factura estimada queda en ~48,8 USD/mes, de los cuales **ALB (17,58)
+más IPv4 (13,87) son ~65%**. Ninguno de los cuatro cambios los toca, y el `LCUUsage` de
+0,0018 USD demuestra que ese gasto no responde a la demanda. Eliminarlos exige sacar la API
+de Fargate; ver el cierre de `runbook-ahorro-costos.md`.
+
 ## Diagrama general
 
 ```mermaid
@@ -88,16 +151,17 @@ flowchart TB
                 ALB["ALB bible-alb · internet-facing<br/>listener HTTP :80<br/>regla 1: X-Origin-Verify → forward<br/>default: 403<br/>SG: solo prefix list CloudFront"]
 
                 subgraph ecs["ECS cluster biblia-cluster"]
-                    TASK["Task bible-references-task:21 · FARGATE<br/>1/1 running · 512 CPU / 1024 MB<br/>:8080 · sg-09f1e2be72d76adbe<br/>health check HEALTHY"]
+                    TASK["Task bible-references-task:21 · FARGATE_SPOT<br/>1/1 running · 512 CPU / 1024 MB<br/>:8080 · sg-09f1e2be72d76adbe<br/>health check HEALTHY<br/>apagada 01:00-06:55"]
                 end
 
-                RDS[("RDS database-2 · PostgreSQL 17.9<br/>db.t4g.micro · single-AZ<br/>PubliclyAccessible TRUE<br/>sg default: 5432 desde 0.0.0.0/0")]
+                RDS[("RDS database-2 · PostgreSQL 17.9<br/>db.t4g.micro · single-AZ<br/>PubliclyAccessible FALSE<br/>bible-rds-sg: 5432 desde bible-ecs-sg<br/>parada 01:10-06:40")]
             end
         end
 
         SM["Secrets Manager<br/>bible-references/db"]
         CW["CloudWatch Logs<br/>/ecs/bible-references"]
         IAM["IAM ecsTaskExecutionRole<br/>executionRole + taskRole"]
+        SCH["EventBridge Scheduler<br/>4 schedules · America/Mexico_City<br/>apagado nocturno"]
     end
 
     INTERNET(["Cualquier host<br/>de internet"])
@@ -112,19 +176,22 @@ flowchart TB
     ALB -->|"HTTP :8080 · tg bible-tg<br/>health /actuator/health"| TASK
     TASK -->|"JDBC 5432"| RDS
 
-    INTERNET -->|"tcp 5432 ABIERTO<br/>hallazgo 1 sin resolver"| RDS
+    INTERNET -.->|"bloqueado: sin IP publica<br/>hallazgo 1 resuelto"| RDS
     INTERNET -.->|"bloqueado: SG + header"| ALB
 
     TASK -.->|"secretos al arrancar"| SM
     TASK -.->|"awslogs"| CW
     IAM -.-> TASK
 
+    SCH -.->|"desiredCount 0 / 1"| TASK
+    SCH -.->|"stop / start"| RDS
+
     classDef awsSvc fill:#232f3e,stroke:#ff9900,color:#fff
     classDef ext fill:#1a4d5c,stroke:#4dd0e1,color:#fff
     classDef risk fill:#5c1a1a,stroke:#e57373,color:#fff
-    class ECR,TASK,SM,CW,IAM,CF,S3,ALB awsSvc
+    class ECR,TASK,SM,CW,IAM,CF,S3,ALB,RDS,SCH awsSvc
     class GH,GHA,USER ext
-    class RDS,INTERNET risk
+    class INTERNET risk
 ```
 
 ## Camino real del tráfico
@@ -185,7 +252,7 @@ sequenceDiagram
 | Frontend estático | S3 `biblia-frontend-prod` | Los 4 flags de Block Public Access en `true`; policy no pública |
 | Registro de imágenes | ECR `bible-references` | Tags `:latest` y `:<git-sha>`; lifecycle policy que conserva las 2 más recientes (desde 2026-08-04) |
 | Cluster | `biblia-cluster` | ECS |
-| Servicio | `bible-references-service` | `ACTIVE`, desired 1 / running 1, FARGATE |
+| Servicio | `bible-references-service` | `ACTIVE`, desired 1 / running 1, capacity provider `FARGATE_SPOT` (desde 2026-08-13) |
 | Task definition | `bible-references-task:21` | 512 CPU / 1024 MB, `awsvpc`, health check `curl -f .../actuator/health` con `startPeriod: 180` |
 | Red de la task | subredes `...1526d` (1a) y `...87fcd` (1b) | `assignPublicIp: ENABLED`, SG `sg-09f1e2be72d76adbe` |
 | Load balancer | `bible-alb` | Internet-facing; un solo listener: HTTP:80 |
@@ -193,8 +260,9 @@ sequenceDiagram
 | Target group | `bible-tg` | HTTP 8080, target type `ip`, health check `/actuator/health`, intervalo 30 s, umbral 2 |
 | SG del ALB | `sg-0f48e25801a170bef` (`bible-alb-sg`) | Única regla de entrada: `tcp/80` desde `pl-0246509e78ddf0729` |
 | SG de las tasks | `sg-09f1e2be72d76adbe` (`bible-ecs-sg`) | Ingress 8080 **solo desde `bible-alb-sg`** — correcto |
-| Base de datos | RDS `database-2` | PostgreSQL 17.9, `db.t4g.micro`, single-AZ, cifrada, backup 1 día |
-| SG de la base de datos | `sg-050bc646783252d10` (`default`) | Ingress **5432 desde `0.0.0.0/0`** — sin resolver |
+| Base de datos | RDS `database-2` | PostgreSQL 17.9, `db.t4g.micro`, single-AZ, cifrada, backup 1 día, **sin IP pública** (desde 2026-08-13) |
+| SG de la base de datos | `sg-05d935e48e7d6fb1f` (`bible-rds-sg`) | Ingress `5432` **solo desde `bible-ecs-sg`** (desde 2026-08-13) |
+| Apagado nocturno | 4 schedules de EventBridge Scheduler | `bible-ecs-stop` 01:00, `bible-rds-stop` 01:10, `bible-rds-start` 06:40, `bible-ecs-start` 06:55 (`America/Mexico_City`); rol `bible-scheduler-role` |
 | Subredes y rutas | `rtb-0b06ff11bb534e762` (main) | Única tabla de rutas: `0.0.0.0/0 → igw-01d6dea5b230b8bdb`; **todas las subredes son públicas** |
 | Secretos | `bible-references/db` | URL apunta a `database-2...rds.amazonaws.com:5432/bible_db` |
 | Logs | `/ecs/bible-references` | Driver `awslogs`, prefijo `ecs`; retención 14 días (desde 2026-08-04). Único log group de la cuenta |
@@ -208,7 +276,7 @@ día y no existían en la revisión del 2026-07-31.
 | # | Estado | Hallazgo |
 |---|---|---|
 | 0 | ✅ RESUELTO | Bucle de reinicio: `curl` ausente en la imagen |
-| **1** | 🔴 **ABIERTO — CRÍTICO** | **La base de datos acepta 5432 desde `0.0.0.0/0`** |
+| 1 | ✅ RESUELTO | La base de datos aceptaba 5432 desde `0.0.0.0/0` — cerrado el 2026-08-13 |
 | 2 | ✅ RESUELTO | El ALB era alcanzable saltándose CloudFront |
 | 3 | 🟡 ABIERTO — medio | RDS single-AZ, backup 1 día, sin deletion protection |
 | 4 | 🟡 ABIERTO — medio | Hazelcast con multicast, no funciona en VPC |
@@ -222,9 +290,9 @@ día y no existían en la revisión del 2026-07-31.
 | 11 | ℹ️ INFORMATIVO | El cluster de ECS lo gestiona CloudFormation, no la consola |
 | 12 | ✅ RESUELTO | ECR sin caducidad de imágenes y logs sin retención |
 
-Prioridad real: **el único crítico sigue siendo el 1**. El 8 va inmediatamente después no
-por gravedad propia, sino porque adoptar el state es lo que permite corregir los demás por
-código en vez de a mano.
+Prioridad real: **cerrado el 1, ya no queda ningún crítico abierto.** El 8 pasa a encabezar
+la lista, no por gravedad propia sino porque adoptar el state es lo que permite corregir los
+demás por código en vez de a mano.
 
 ### 0. RESUELTO — Bucle de reinicio del servicio
 
@@ -278,35 +346,43 @@ las 21:26:47, previo a la revisión 19; no ha habido ninguno después.
 Herramientas disponibles en la imagen, comprobadas: `bash`, `perl`, `getent`, `timeout`,
 `java`. Ausentes: `curl`, `wget`, `nc`, `python3`, `busybox`.
 
-### 1. CRÍTICO — SIN RESOLVER — La base de datos está expuesta a internet
+### 1. RESUELTO — La base de datos estaba expuesta a internet
 
-**Es el único hallazgo crítico y sigue abierto.** Tres condiciones verificadas se combinan:
+Hasta el 2026-08-13, tres condiciones se combinaban:
 
-- `database-2` tiene `PubliclyAccessible: true`.
+- `database-2` tenía `PubliclyAccessible: true`.
 - Vive en el subnet group `default-vpc-0a224eceeb1c0720a`, cuyas tres subredes usan la
   tabla de rutas principal con `0.0.0.0/0 → igw-01d6dea5b230b8bdb`, es decir, son públicas.
-- Su grupo de seguridad es el `default` de la VPC, que permite **tcp/5432 desde
+- Su grupo de seguridad era el `default` de la VPC, que permitía **tcp/5432 desde
   `0.0.0.0/0`**.
 
-El resultado es que `database-2.c1ggwasugrmo.mx-central-1.rds.amazonaws.com:5432` acepta
-conexiones desde cualquier host de internet, y lo único que separa los datos de un atacante
-es la contraseña. Queda expuesta a fuerza bruta, a escaneo masivo de puertos y a cualquier
-CVE de autenticación de PostgreSQL.
+`database-2.c1ggwasugrmo.mx-central-1.rds.amazonaws.com:5432` aceptaba conexiones desde
+cualquier host de internet, y lo único que separaba los datos de un atacante era la
+contraseña.
 
-Remediación, en orden:
+**Corregido el 2026-08-13**, en el mismo trabajo de reducción de costes: quitar la IP
+pública cerraba el hallazgo *y* eliminaba una dirección IPv4 facturable, así que la misma
+acción servía para las dos cosas.
 
-1. Reemplazar la regla `5432 desde 0.0.0.0/0` por `5432 desde sg-09f1e2be72d76adbe`
-   (`bible-ecs-sg`). Es el cambio que cierra la exposición y **debe ir primero**; sin él,
-   los pasos siguientes no aportan nada.
-2. Poner `PubliclyAccessible: false`.
-3. Crear subredes privadas y un DB subnet group propio, y mover la instancia.
-4. Dejar de usar el SG `default` para la base de datos; crear `bible-rds-sg` dedicado.
-5. Rotar la contraseña, asumiendo que pudo haber sido expuesta.
+| Paso | Acción | Resultado |
+|---|---|---|
+| 1 | Creado `bible-rds-sg` (`sg-05d935e48e7d6fb1f`) con `5432` solo desde `bible-ecs-sg` | Mismo patrón que ya usaba el SG de las tasks |
+| 2 | `modify-db-instance --vpc-security-group-ids ... --no-publicly-accessible` | 30 s en `modifying`; sin corte perceptible |
+| 3 | Revocada la regla `5432 desde 0.0.0.0/0` del SG `default` | El grupo queda solo con su regla `self` |
 
-> Los pasos 1 y 2 modifican la ruta de red de una base de datos en uso. El paso 2 provoca
-> un cambio de la IP pública y puede requerir reinicio. Convendría aplicarlos en ventana
-> de mantenimiento y confirmando primero que la task de ECS alcanza la instancia por su
-> DNS interno.
+Verificado después: `PubliclyAccessible: false`, un único SG asociado, 0 interfaces de red
+usando el grupo `default`, y `/api/bible/chapter/{1/1, 1/7, 43/3}` respondiendo 200 —o sea
+que las consultas a la base siguen funcionando.
+
+**Queda pendiente**, como defensa en profundidad y sin urgencia:
+
+- La instancia sigue en subredes públicas (condición 2). Sin IP pública ni regla abierta ya
+  no es alcanzable, pero lo limpio sería un DB subnet group privado propio.
+- Rotar la contraseña, asumiendo que pudo haber sido expuesta durante el tiempo que el
+  puerto estuvo abierto.
+
+> **Consecuencia operativa:** la base de datos ya no es accesible desde fuera de la VPC.
+> Para administrarla con un cliente SQL hace falta port forwarding por SSM o un bastion.
 
 ### 2. RESUELTO — El ALB era alcanzable saltándose CloudFront
 
@@ -469,9 +545,9 @@ cuenta ajena tuvo acceso concedido a un bucket de esta cuenta**.
 ### 8. PARCIALMENTE RESUELTO — Infraestructura versionada pero no adoptada
 
 Toda la infraestructura descrita aquí está ahora declarada en `terraform/`. El módulo
-**describe el estado real, no una versión mejorada de él**: los hallazgos 1, 3, 4 y 5
-quedan escritos tal como están, con comentarios que explican qué falla y cómo se corrige,
-para que `plan` no proponga cambios. Verificado el 2026-08-04:
+**describe el estado real, no una versión mejorada de él**: los hallazgos 3, 4 y 5 quedan
+escritos tal como están, con comentarios que explican qué falla y cómo se corrige, para que
+`plan` no proponga cambios. Verificado el 2026-08-04:
 
 ```
 Plan: 28 to import, 0 to add, 3 to change, 0 to destroy.
@@ -479,6 +555,13 @@ Plan: 28 to import, 0 to add, 3 to change, 0 to destroy.
 
 Los 3 cambios son cosméticos y no corresponden a diferencias reales con AWS; están
 explicados en `terraform/README.md`.
+
+> **Ese recuento ya no vale.** Los cambios del 2026-08-13 añadieron ocho recursos nuevos
+> —`bible-rds-sg` y su regla, el rol y la política del scheduler, y los cuatro schedules—,
+> cada uno con su bloque en `imports.tf`. **El plan no se ha vuelto a ejecutar**: el
+> registry de Terraform no era alcanzable desde el entorno donde se aplicaron los cambios,
+> así que `init` falló y no se pudo revalidar. Conviene correrlo antes de dar el módulo por
+> bueno.
 
 **Lo que falta: nunca se ha ejecutado `terraform apply`.** No existe archivo de state, así
 que hoy el módulo es documentación ejecutable, no la fuente de verdad:
@@ -651,14 +734,17 @@ políticas de expiración: confirma exactamente qué imágenes sobreviven.
 
 ## Trabajo pendiente, por prioridad
 
-1. **Hallazgo 1** — cerrar el acceso a RDS desde internet. Único crítico abierto.
-2. **Hallazgo 8** — adoptar el state de Terraform y moverlo a un backend cifrado. Barato
+0. **Verificar el primer disparo del apagado nocturno** (madrugada del 2026-08-14). Es lo
+   único con fecha. Comandos en `runbook-ahorro-costos.md`, punto 4.
+1. **Hallazgo 8** — adoptar el state de Terraform y moverlo a un backend cifrado. Barato
    (el `apply` de los imports no toca AWS) y desbloquea que los demás hallazgos se
    corrijan por código en vez de a mano. Resolver de paso el **hallazgo 11**, para no
    adoptar un cluster que CloudFormation ya considera suyo.
-3. **Hallazgo 9** — desactivar la llave de acceso de `gdgr`, sin usar desde julio de 2025.
+2. **Hallazgo 9** — desactivar la llave de acceso de `gdgr`, sin usar desde julio de 2025.
    Es un comando y no rompe nada mientras `aws login` siga funcionando.
-4. **Hallazgo 3** — deletion protection y retención de backups en RDS.
+3. **Hallazgo 3** — deletion protection y retención de backups en RDS.
+4. **Rotar la contraseña de la base de datos**, asumiendo que pudo quedar expuesta mientras
+   el puerto 5432 estuvo abierto a internet (hallazgo 1, ya cerrado).
 5. **Cifrar el tramo CloudFront → ALB** (listener 443 con ACM, origen a `https-only`).
 6. **Hallazgo 6b** — confirmar si el frontend envía `X-Client-Origin`.
 7. **Hallazgos 4, 5, 6** — Hazelcast, separación de roles IAM, OIDC. El 6 se resuelve junto

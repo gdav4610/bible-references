@@ -56,15 +56,41 @@ resource "aws_vpc_security_group_egress_rule" "ecs_all" {
 }
 
 # ---------------------------------------------------------------------------
-# Grupo de seguridad por defecto de la VPC — HALLAZGO 1, SIN RESOLVER
+# Grupo de seguridad de la base de datos — HALLAZGO 1
 #
-# La instancia de RDS usa este grupo, que admite 5432 desde 0.0.0.0/0. Sumado a
-# `publicly_accessible = true` y a que las subredes son públicas, la base de
-# datos acepta conexiones desde cualquier host de internet.
+# Grupo dedicado, creado el 2026-08-13 para sacar a RDS del grupo `default` de
+# la VPC. Sigue el mismo patrón que bible-ecs-sg: el puerto se abre únicamente
+# al grupo que necesita hablar con él, sin CIDR abierto.
 #
-# Se declara tal como está HOY para que `plan` salga limpio. La corrección es
-# sustituir la regla abierta por una que referencie aws_security_group.ecs_tasks,
-# idealmente moviendo RDS a un grupo dedicado. Ver docs/aws-architecture.md.
+# Sustituye a la regla `5432 desde 0.0.0.0/0` que tenía el grupo `default`, que
+# es lo que exponía la base de datos a todo internet.
+# ---------------------------------------------------------------------------
+
+resource "aws_security_group" "rds" {
+  name        = "bible-rds-sg"
+  description = "Security group for Bible RDS instance"
+  vpc_id      = data.aws_vpc.main.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rds_from_ecs" {
+  security_group_id            = aws_security_group.rds.id
+  description                  = "PostgreSQL solo desde las tasks de ECS"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.ecs_tasks.id
+}
+
+# ---------------------------------------------------------------------------
+# Grupo de seguridad por defecto de la VPC
+#
+# Hasta el 2026-08-13 este grupo admitía `5432 desde 0.0.0.0/0` y era el que
+# usaba la instancia de RDS: ahí estaba el hallazgo 1. La regla se revocó y la
+# base de datos se movió a bible-rds-sg (arriba), así que hoy el grupo queda
+# solo con la regla `self` que trae AWS de fábrica.
+#
+# Se mantiene declarado para que Terraform conserve la propiedad del grupo y
+# nadie vuelva a abrirlo desde la consola sin que `plan` lo detecte.
 #
 # CUIDADO: aws_default_security_group asume la propiedad del grupo por defecto y
 # elimina toda regla que no esté declarada aquí. Verificar el plan antes de
@@ -75,17 +101,10 @@ resource "aws_default_security_group" "default" {
   vpc_id = data.aws_vpc.main.id
 
   ingress {
-    protocol    = "tcp"
-    from_port   = 5432
-    to_port     = 5432
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    protocol    = "-1"
-    from_port   = 0
-    to_port     = 0
-    self        = true
+    protocol  = "-1"
+    from_port = 0
+    to_port   = 0
+    self      = true
   }
 
   egress {

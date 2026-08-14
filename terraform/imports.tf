@@ -51,6 +51,18 @@ import {
   id = "sgr-0734c6db6a9f8cb52"
 }
 
+# Creados el 2026-08-13 al cerrar el hallazgo 1: la base de datos salió del
+# grupo `default` a uno propio, y de paso perdió la IP pública.
+import {
+  to = aws_security_group.rds
+  id = "sg-05d935e48e7d6fb1f"
+}
+
+import {
+  to = aws_vpc_security_group_ingress_rule.rds_from_ecs
+  id = "sgr-0fa7c35fc6741c295"
+}
+
 # --- Balanceador -----------------------------------------------------------
 
 import {
@@ -122,6 +134,38 @@ import {
 import {
   to = aws_iam_role_policy_attachment.secrets_manager_read_write
   id = "ecsTaskExecutionRole/arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+}
+
+# --- Apagado nocturno (creado el 2026-08-13) -------------------------------
+
+import {
+  to = aws_iam_role.scheduler
+  id = "bible-scheduler-role"
+}
+
+import {
+  to = aws_iam_role_policy.scheduler
+  id = "bible-scheduler-role:bible-scheduler-policy"
+}
+
+import {
+  to = aws_scheduler_schedule.ecs_stop
+  id = "default/bible-ecs-stop"
+}
+
+import {
+  to = aws_scheduler_schedule.rds_stop
+  id = "default/bible-rds-stop"
+}
+
+import {
+  to = aws_scheduler_schedule.rds_start
+  id = "default/bible-rds-start"
+}
+
+import {
+  to = aws_scheduler_schedule.ecs_start
+  id = "default/bible-ecs-start"
 }
 
 # --- Datos, secretos y logs ------------------------------------------------
