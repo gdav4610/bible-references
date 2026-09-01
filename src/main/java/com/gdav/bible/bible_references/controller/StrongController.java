@@ -1,5 +1,6 @@
 package com.gdav.bible.bible_references.controller;
 
+import com.gdav.bible.bible_references.config.WordCacheCondition;
 import com.gdav.bible.bible_references.model.SourceWordResponse;
 import com.gdav.bible.bible_references.model.SourceWordWithKeywordStatsResponse;
 import com.gdav.bible.bible_references.service.IStrongService;
@@ -12,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,16 +22,28 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.concurrent.TimeUnit;
+
 @RestController
 @RequestMapping("/api/strongs")
 @Validated
 @Tag(name = "Strong", description = "Consulta de códigos Strong: estadísticas de keywords y detalle con versículos")
 public class StrongController {
 
-    private final IStrongService strongService;
+    /**
+     * Cuánto puede guardar CloudFront un código Strong marcado como cacheable.
+     *
+     * <p>Mismo valor que los capítulos en {@code BibleController}, y por la misma razón: el
+     * dato no cambia, el límite es cuánto se tarda en propagar una corrección.
+     */
+    private static final long CACHE_STRONG_SECONDS = 86_400L;
 
-    public StrongController(IStrongService strongService) {
+    private final IStrongService strongService;
+    private final WordCacheCondition wordCacheCondition;
+
+    public StrongController(IStrongService strongService, WordCacheCondition wordCacheCondition) {
         this.strongService = strongService;
+        this.wordCacheCondition = wordCacheCondition;
     }
 
     @Operation(
@@ -75,11 +89,21 @@ public class StrongController {
     @GetMapping("/{strongCode}/stats")
     public ResponseEntity<SourceWordWithKeywordStatsResponse> getStrongKeywordsGrouped(
             @Parameter(description = "Código Strong (simple o compuesto)", example = "H430")
-            @PathVariable @NotBlank String strongCode,
-            @Parameter(description = "Incluir fuentes de la Septuaginta (LXX)", example = "false")
-            @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
-        SourceWordWithKeywordStatsResponse response = strongService.getStrongKeywordsGrouped(strongCode, includeLXX);
-        return ResponseEntity.ok(response);
+            @PathVariable @NotBlank String strongCode) {
+        SourceWordWithKeywordStatsResponse response = strongService.getStrongKeywordsGrouped(strongCode);
+
+        // Misma convención que BibleController: la lista de códigos populares vive en el
+        // código —WordCacheCondition— y el CDN solo obedece. El defecto es no cachear, de
+        // modo que ampliar la caché sea siempre una decisión explícita.
+        //
+        // Este endpoint es el mejor candidato de la API: desde que se quitó `includeLXX` no
+        // tiene ningún parámetro de consulta, así que la ruta determina la respuesta por
+        // completo y no hay forma de que dos peticiones distintas colisionen en la clave.
+        CacheControl cacheControl = wordCacheCondition.shouldCacheWithJustOneParam(strongCode)
+                ? CacheControl.maxAge(CACHE_STRONG_SECONDS, TimeUnit.SECONDS).cachePublic()
+                : CacheControl.noStore();
+
+        return ResponseEntity.ok().cacheControl(cacheControl).body(response);
     }
 
     @Operation(
@@ -130,11 +154,19 @@ public class StrongController {
             @Parameter(description = "Filtro opcional por palabra transliterada", example = "elohim")
             @RequestParam(name = "transliteratedWord", required = false) String transliteratedWord,
             @Parameter(description = "Filtro opcional por palabra traducida", example = "Dios")
-            @RequestParam(name = "translatedWord", required = false) String translatedWord,
-            @Parameter(description = "Incluir fuentes de la Septuaginta (LXX)", example = "false")
-            @RequestParam(name = "includeLXX", required = false) Boolean includeLXX) {
-        SourceWordResponse response = strongService.getStrongDetail(strongCode, transliteratedWord, translatedWord, includeLXX);
-        return ResponseEntity.ok(response);
+            @RequestParam(name = "translatedWord", required = false) String translatedWord) {
+        SourceWordResponse response = strongService.getStrongDetail(strongCode, transliteratedWord, translatedWord);
+
+        // `no-store` siempre, aunque el código esté en la lista de populares. A diferencia de
+        // /stats, aquí la respuesta depende de `transliteratedWord` y `translatedWord`, y la
+        // política de caché de CloudFront **no las lleva en la clave**: cachear esto haría que
+        // una petición filtrada recibiera la respuesta sin filtrar, o la de otro filtro.
+        //
+        // Se deja explícito en vez de arreglar solo la política porque la corrección tiene que
+        // sobrevivir a que alguien cambie la política, que es configuración remota. Si algún
+        // día se quiere cachear el detalle, el orden es: primero las query strings en la
+        // clave, después esta línea.
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(response);
     }
 
 }

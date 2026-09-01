@@ -40,6 +40,8 @@ public class VerseCacheCondition {
         conditions.add(new Condition(1, 1, 1, null));
         conditions.add(new Condition(1, 1, 2, null));
         conditions.add(new Condition(1, 1, 3, null));
+        conditions.add(new Condition(1, 1, 15, null));
+        conditions.add(new Condition(1, 2, 3, null));
         conditions.add(new Condition(1, 40, 1, null));
         conditions.add(new Condition(1, 43, 1, null));
         conditions.add(new Condition(1, 43, 3, null));
@@ -52,10 +54,35 @@ public class VerseCacheCondition {
     public boolean shouldCacheVerse(Integer idBible, Integer idBook, Integer chapter, Integer idVerse) {
         for (Condition c : conditions) {
             if (c.matches(idBible, idBook, chapter, idVerse)) {
-                return true;
+                return true;º
             }
         }
         return false;
+    }
+
+    /**
+     * Traduce el parámetro {@code includeLXX} de la API al identificador de biblia:
+     * 2 para la Septuaginta, 1 para el texto por defecto.
+     *
+     * <p>Vive aquí para que exista UNA sola definición: la usan tanto {@code BibleService},
+     * al consultar, como {@code BibleController}, al decidir si la respuesta es cacheable.
+     */
+    public static int idBibleFor(Boolean includeLxx) {
+        return (includeLxx != null && includeLxx) ? 2 : 1;
+    }
+
+    /**
+     * Variante pensada para el controlador, que trabaja con los parámetros tal como llegan
+     * por HTTP y no conoce el identificador de biblia.
+     *
+     * <p>Se usa para decidir si la respuesta lleva {@code Cache-Control} y, por tanto, si
+     * CloudFront la guarda en el borde. Comparte lista con la caché en memoria a propósito:
+     * un capítulo que merece cachearse localmente merece cachearse también en el CDN, y así
+     * añadir uno nuevo es tocar un único sitio —el constructor de esta clase— sin
+     * reconfigurar CloudFront.
+     */
+    public boolean shouldCacheChapter(Integer idBook, Integer chapter, Integer idVerse, Boolean includeLxx) {
+        return shouldCacheVerse(idBibleFor(includeLxx), idBook, chapter, idVerse);
     }
 
     // utilidades para tests o future config: permitir agregar condiciones programáticamente

@@ -1,5 +1,6 @@
 package com.gdav.bible.bible_references.service;
 
+import com.gdav.bible.bible_references.config.VerseCacheCondition;
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
 import com.gdav.bible.bible_references.model.ChapterResponse;
 import com.gdav.bible.bible_references.model.Keyword;
@@ -36,7 +37,9 @@ public class BibleService implements IBibleService {
     @Transactional(readOnly = true)
     public ChapterResponse getChapter(int idBook, int chapter, Integer idVerse, Boolean includeLxx) {
         String bookName = getBookName(idBook);
-        int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
+        // La traducción includeLXX -> idBible vive en VerseCacheCondition para que el
+        // controlador pueda decidir la cacheabilidad con el mismo criterio, sin duplicarla.
+        int idBible = VerseCacheCondition.idBibleFor(includeLxx);
 
         List<VerseEntity> versesEntityList = repository.findAllByIdBookAndChapter(idBible, idBook, chapter, idVerse );
 
@@ -67,10 +70,15 @@ public class BibleService implements IBibleService {
 
     @Override
     @Transactional(readOnly = true)
-    public SearchResultResponse search(String q, Boolean includeLxx) {
-        int idBible = (includeLxx != null && includeLxx) ? 2 : 1;
+    public SearchResultResponse search(String q, Integer limit) {
+        int idBible = VerseCacheCondition.idBibleFor(null);
         String qq = "\\m" + q;
-        List<SearchProjection> projectionList = searchRepository.findAllByWord(idBible, qq );
+
+        int tope = limitePedido(limit);
+        // Se pide un versículo de más: si vuelve, es que había más de los que caben, y así se
+        // sabe que el resultado está truncado sin una segunda consulta de conteo, que
+        // repetiría el escaneo con la expresión regular sobre toda la Biblia.
+        List<SearchProjection> projectionList = searchRepository.findAllByWord(idBible, qq, tope + 1);
 
         List<SearchResponse> versesList;
         if (projectionList == null || projectionList.isEmpty()) {
@@ -100,7 +108,28 @@ public class BibleService implements IBibleService {
             }).collect(Collectors.toList());
         }
 
-        return new SearchResultResponse(versesList);
+        boolean truncado = versesList.size() > tope;
+        if (truncado) {
+            // El versículo sobrante era solo la señal de que hay más; no se devuelve.
+            versesList = versesList.subList(0, tope);
+            logger.info("Búsqueda truncada a {} versículos (había más)", tope);
+        }
+
+        return new SearchResultResponse(versesList, versesList.size(), truncado);
+    }
+
+    /**
+     * Traduce el límite pedido por el cliente a uno aplicable.
+     *
+     * <p>Un valor ausente o no positivo cae al de por defecto en lugar de rechazarse: la
+     * validación de entrada es cosa del controlador, y el servicio no debe poder devolver
+     * una respuesta sin acotar por mucho que le pidan cero o un número negativo.
+     */
+    private int limitePedido(Integer limit) {
+        if (limit == null || limit <= 0) {
+            return DEFAULT_SEARCH_LIMIT;
+        }
+        return Math.min(limit, MAX_SEARCH_LIMIT);
     }
 
     // Copiar método getBookName del controller (puede moverse a util común)

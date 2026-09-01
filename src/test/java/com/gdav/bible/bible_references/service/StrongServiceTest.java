@@ -70,7 +70,7 @@ class StrongServiceTest {
         when(compoundWordRepository.findKeywordTranslatedCountsByIdWord(eq(keyUpper), anyList(), anyString()))
                 .thenReturn((List<Object[]>) Arrays.asList(new CompoundWordEntity("t2", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, new ArrayList<KeywordEntity>())));
 */
-        SourceWordWithKeywordStatsResponse res = strongService.getStrongKeywordsGrouped(strongCode, false);
+        SourceWordWithKeywordStatsResponse res = strongService.getStrongKeywordsGrouped(strongCode);
 
         assertNotNull(res);
         assertEquals(keyUpper, res.idWord());
@@ -103,7 +103,7 @@ class StrongServiceTest {
         when(sourceWordRepository.findKeywordCountsByIdWord(eq(keyUpper), anyList())).thenReturn(Arrays.asList());
         when(sourceWordRepository.findKeywordTranslatedCountsByIdWord(eq(keyUpper), anyList())).thenReturn(Arrays.asList());
 */
-        SourceWordResponse resp = strongService.getStrongDetail(strongCode, null, null, false);
+        SourceWordResponse resp = strongService.getStrongDetail(strongCode, null, null);
         assertNotNull(resp);
         assertEquals(keyUpper, resp.idWord());
     }
@@ -111,7 +111,7 @@ class StrongServiceTest {
     @Test
     void getStrongKeywordsGrouped_notFound_throws() {
         when(compoundWordRepository.findByIdWord(anyString())).thenReturn(null);
-        assertThrows(ResourceNotFoundException.class, () -> strongService.getStrongKeywordsGrouped("A B", false));
+        assertThrows(ResourceNotFoundException.class, () -> strongService.getStrongKeywordsGrouped("A B"));
     }
 
 }

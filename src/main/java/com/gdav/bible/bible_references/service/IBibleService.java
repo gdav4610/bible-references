@@ -20,9 +20,28 @@ public interface IBibleService {
     /**
      * Busca versículos que contengan la palabra indicada, agrupados por versículo.
      *
+     * <p>El resultado va <b>siempre acotado</b>. No es una preferencia de presentación: sin
+     * límite, una búsqueda de una palabra frecuente devuelve varios MB y la respuesta supera
+     * el máximo de 6 MB que admite una invocación síncrona de Lambda, con lo que la petición
+     * falla con 502 y además se lleva por delante el entorno de ejecución.
+     *
      * @param q          término de búsqueda
-     * @param includeLxx si se debe buscar sobre la fuente LXX
-     * @return resultados de búsqueda (posiblemente vacíos)
+     * @param limit      máximo de versículos a devolver; {@code null} aplica
+     *                   {@link #DEFAULT_SEARCH_LIMIT} y cualquier valor mayor se recorta a
+     *                   {@link #MAX_SEARCH_LIMIT}
+     * @return resultados de búsqueda (posiblemente vacíos), indicando si se truncaron
      */
-    SearchResultResponse search(String q, Boolean includeLxx);
+    SearchResultResponse search(String q, Integer limit);
+
+    /** Versículos que se devuelven cuando el cliente no pide un límite. */
+    int DEFAULT_SEARCH_LIMIT = 500;
+
+    /**
+     * Tope absoluto, aunque el cliente pida más.
+     *
+     * <p>Con ~1,4 KB por versículo medidos en producción, 2.000 versículos son unos 2,8 MB:
+     * queda margen suficiente por debajo de los 6 MB de Lambda incluso si los versículos
+     * fueran bastante más largos que la media.
+     */
+    int MAX_SEARCH_LIMIT = 2000;
 }

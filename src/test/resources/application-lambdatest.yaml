@@ -1,0 +1,28 @@
+# Perfil usado únicamente por StreamLambdaHandlerTest.
+#
+# Levanta el contexto completo de Spring contra H2 en memoria para poder ejercitar el
+# handler de Lambda de extremo a extremo sin una PostgreSQL real. Solo redefine lo
+# imprescindible: el resto —incluidos `app.frontend.origin` y la configuración de caché—
+# se hereda del application.yaml real, que es lo que interesa probar.
+spring:
+  datasource:
+    url: jdbc:h2:mem:bibletest;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      # Crea el esquema a partir de las entidades: las tablas quedan vacías, que es
+      # justo lo que hace falta. Con datos reales la prueba dependería de un dump.
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        # Sobrescribe el dialecto de PostgreSQL del application.yaml principal.
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: false
+
+logging:
+  level:
+    com.gdav: INFO
+    org.hibernate.SQL: WARN

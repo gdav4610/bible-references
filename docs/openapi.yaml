@@ -1,0 +1,514 @@
+openapi: 3.0.3
+
+info:
+  title: bible-references API
+  version: "1.0.0"
+  description: |
+    API de lectura bíblica con keywords y códigos Strong.
+
+    Especificación escrita a partir de los controladores reales (`BibleController`,
+    `StrongController`) y verificada contra producción el 2026-08-25.
+
+    ## Antes de probar, tres cosas que hacen fallar las peticiones
+
+    **1. La cabecera `X-Client-Origin` es obligatoria.** Sin ella, `OriginValidationFilter`
+    responde `403 Forbidden: missing Origin header` antes de llegar a la lógica. Ya va
+    rellenada por defecto en cada petición de esta especificación con el valor válido
+    `https://escrituraclave.com`.
+
+    **2. La API no funciona de 23:10 a 07:40 (hora de Ciudad de México).** La base de datos se
+    apaga por la noche para ahorrar costes; es una decisión deliberada, no una avería. En esa
+    franja las peticiones devuelven `500`.
+
+    **3. Solo existen las cuatro rutas de este documento.** Desde el 2026-08-25 API Gateway no
+    tiene comodín: cualquier otra ruta bajo `/api/` responde
+    `403 {"message":"Missing Authentication Token"}` sin llegar a la aplicación. Si añades un
+    endpoint al código, hay que declararlo también en API Gateway.
+
+    ## Límites de tasa
+
+    | Capa | Límite |
+    |---|---|
+    | WAF de CloudFront | 150 peticiones por IP cada 5 min |
+    | Throttling de API Gateway | 10 rps sostenido, ráfaga 20 (global) |
+    | WAF regional | 500 por IP cada 5 min |
+
+    Al superarlos recibirás `403` (WAF) o `429` (API Gateway). Para pruebas manuales desde
+    Postman no deberías acercarte, pero evita lanzar *runners* con cientos de iteraciones.
+
+    ## Sobre la URL directa de API Gateway
+
+    `https://m9zcdngc1m.execute-api.mx-central-1.amazonaws.com/prod` existe pero **no sirve
+    para probar**: exige la cabecera secreta `X-Origin-Verify` que solo inyecta CloudFront.
+    Sin ella devuelve `403 Forbidden`. Usa siempre el servidor de producción.
+
+servers:
+  - url: https://escrituraclave.com
+    description: Producción, a través de CloudFront
+
+tags:
+  - name: Bible
+    description: Lectura de capítulos y búsqueda de versículos
+  - name: Strong
+    description: "Consulta de códigos Strong: estadísticas de keywords y detalle con versículos"
+
+paths:
+
+  /api/bible/chapter/{idBook}/{chapter}:
+    get:
+      tags: [Bible]
+      operationId: getChapter
+      summary: Obtiene un capítulo (o un versículo puntual)
+      description: |
+        Devuelve los versículos de un capítulo con sus keywords. Si se envía `idVerse` solo se
+        devuelve ese versículo. `idBook` va de 1 (Génesis) a 66 (Apocalipsis).
+      parameters:
+        - $ref: '#/components/parameters/ClientOrigin'
+        - name: idBook
+          in: path
+          required: true
+          description: Id del libro (1=Génesis … 66=Apocalipsis)
+          schema: { type: integer, minimum: 1, maximum: 66, default: 1 }
+          example: 1
+        - name: chapter
+          in: path
+          required: true
+          description: Número de capítulo
+          schema: { type: integer, minimum: 1, default: 1 }
+          example: 1
+        - name: idVerse
+          in: query
+          required: false
+          description: Versículo puntual; si se omite, devuelve el capítulo completo
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: includeLXX
+          in: query
+          required: false
+          description: Usar fuente LXX (Septuaginta)
+          schema: { type: boolean }
+          example: false
+      responses:
+        '200':
+          description: Capítulo con sus versículos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChapterResponse' }
+              example:
+                book: "Génesis"
+                chapter: 1
+                verses:
+                  - verseNumber: 1
+                    text: "En el principio creó Dios los cielos y la tierra."
+                    keywords:
+                      - inflectionWord: "אֱלֹהִים"
+                        translatedWord: "Dios"
+                        transliteratedWord: "elohim"
+                        strongNumber: "H430"
+                        sourceTransliteration: "elohim"
+                        sourceInflection: "אֱלֹהִים"
+                        sourceMeaning: "Dios, dioses"
+                        compoundTransliteration: null
+                        compoundInflection: null
+                        compoundMeaning: null
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/bible/search:
+    get:
+      tags: [Bible]
+      operationId: search
+      summary: Busca versículos por palabra
+      description: |
+        Busca versículos que contengan la palabra `q`, agrupando por versículo.
+
+        Es el endpoint más costoso de la API: la consulta recorre todo el texto bíblico y
+        tarda entre 1,1 y 1,6 s. La respuesta indica en `truncated` si había más resultados
+        de los devueltos.
+
+        > **La búsqueda opera sobre el texto en español, no sobre la transliteración.**
+        > `q=Dios`, `q=principio` o `q=luz` devuelven resultados; `q=elohim` devuelve una lista
+        > vacía con `200`, que es correcto y no un fallo. Para buscar por palabra original usa
+        > los endpoints de Strong.
+      parameters:
+        - $ref: '#/components/parameters/ClientOrigin'
+        - name: q
+          in: query
+          required: true
+          description: Palabra a buscar, en español. Obligatoria y no puede estar en blanco.
+          schema: { type: string, minLength: 1, default: "Dios" }
+          example: Dios
+        - name: limit
+          in: query
+          required: false
+          description: Máximo de versículos a devolver. Por defecto 500; cualquier valor mayor se recorta a 2000.
+          schema: { type: integer, minimum: 1, default: 500, maximum: 2000 }
+          example: 500
+      responses:
+        '200':
+          description: Resultados de búsqueda
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResultResponse' }
+              example:
+                verses:
+                  - idBook: 1
+                    chapter: 1
+                    verseNumber: 1
+                    text: "En el principio creó Dios los cielos y la tierra."
+                    keywords:
+                      - inflectionWord: "אֱלֹהִ֑ים"
+                        translatedWord: "Dios"
+                        transliteratedWord: "’ĕlōhîm"
+                        strongNumber: "H430"
+                        sourceTransliteration: null
+                        sourceInflection: null
+                        sourceMeaning: null
+                        compoundTransliteration: null
+                        compoundInflection: null
+                        compoundMeaning: null
+                returnedVerses: 1
+                truncated: true
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/strongs/{strongCode}/stats:
+    get:
+      tags: [Strong]
+      operationId: getStrongKeywordsGrouped
+      summary: Estadísticas de keywords de un código Strong
+      description: |
+        Devuelve la palabra fuente asociada al código Strong con el conteo de sus keywords
+        (transliteradas y traducidas). Acepta códigos simples (`H430`) o compuestos separados
+        por espacio (`H853 H430`).
+      parameters:
+        - $ref: '#/components/parameters/ClientOrigin'
+        - name: strongCode
+          in: path
+          required: true
+          description: Código Strong, simple o compuesto
+          schema: { type: string, minLength: 1, default: "H430" }
+          example: H430
+      responses:
+        '200':
+          description: Palabra fuente con estadísticas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceWordWithKeywordStatsResponse' }
+              example:
+                idWord: "H430"
+                transliteration: "elohim"
+                inflection: "אֱלֹהִים"
+                meaning: "Dios, dioses"
+                idParent: "H433"
+                idParentSec: null
+                parentMeaning: "deidad"
+                parentSecMeaning: null
+                firstAppBook: 1
+                firstAppChapter: 1
+                firstAppVerse: 1
+                keywordStats:
+                  - { transliteratedWord: "elohim", translatedWord: null, count: 2346 }
+                keywordStatsTranslated:
+                  - { transliteratedWord: null, translatedWord: "Dios", count: 2601 }
+                compoundRelatedList: []
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/strongs/{strongCode}/details:
+    get:
+      tags: [Strong]
+      operationId: getStrongDetail
+      summary: Detalle de un código Strong con sus versículos
+      description: |
+        Devuelve la palabra fuente y la lista de apariciones (keywords con su versículo).
+        Los filtros `transliteratedWord` y `translatedWord` son opcionales y acotan las apariciones.
+
+        > **Nota:** en producción este endpoint devuelve `404` para cualquier código. Es un
+        > comportamiento preexistente y conocido, anotado como hallazgo abierto en
+        > `docs/aws-architecture.md`; no es un fallo de la petición que envíes.
+      parameters:
+        - $ref: '#/components/parameters/ClientOrigin'
+        - name: strongCode
+          in: path
+          required: true
+          description: Código Strong, simple o compuesto
+          schema: { type: string, minLength: 1, default: "H430" }
+          example: H430
+        - name: transliteratedWord
+          in: query
+          required: false
+          description: Filtro opcional por palabra transliterada
+          schema: { type: string }
+          example: elohim
+        - name: translatedWord
+          in: query
+          required: false
+          description: Filtro opcional por palabra traducida
+          schema: { type: string }
+          example: Dios
+      responses:
+        '200':
+          description: Detalle de la palabra fuente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceWordResponse' }
+              example:
+                idWord: "H430"
+                transliteration: "elohim"
+                inflection: "אֱלֹהִים"
+                meaning: "Dios, dioses"
+                idParent: "H433"
+                idParentSec: null
+                parentMeaning: "deidad"
+                parentSecMeaning: null
+                keywordsWithVerse:
+                  - inflectionWord: "אֱלֹהִים"
+                    translatedWord: "Dios"
+                    transliteratedWord: "elohim"
+                    idBook: 1
+                    chapter: 1
+                    verseNumber: 1
+                    verseText: "En el principio creó Dios los cielos y la tierra."
+                    appearanceInVerse: 1
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+components:
+
+  parameters:
+    ClientOrigin:
+      name: X-Client-Origin
+      in: header
+      required: true
+      description: |
+        Origen del cliente. Obligatorio: sin esta cabecera la API responde 403 antes de
+        ejecutar nada. El valor debe coincidir con uno de los orígenes permitidos.
+      schema:
+        type: string
+        default: https://escrituraclave.com
+      example: https://escrituraclave.com
+
+  responses:
+    ValidationError:
+      description: Parámetros inválidos
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            errorCode: VALIDATION_ERROR
+            message: Validation failed for one or more parameters
+            path: /api/bible/chapter/0/1
+            timestamp: "2026-07-07T12:00:00Z"
+            fieldErrors:
+              - { field: "getChapter.idBook", message: "must be greater than 0" }
+
+    NotFound:
+      description: Código Strong inexistente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            errorCode: RESOURCE_NOT_FOUND
+            message: "Strong code not found: H99999"
+            path: /api/strongs/H99999/stats
+            timestamp: "2026-07-07T12:00:00Z"
+            fieldErrors: []
+
+    Forbidden:
+      description: |
+        Rechazado antes de la lógica de negocio. Tres causas posibles, distinguibles por el cuerpo:
+
+        - `Forbidden: missing Origin header` — falta la cabecera `X-Client-Origin`.
+        - `Forbidden origin: <valor>` — el origen enviado no está en la lista permitida.
+        - `{"message":"Missing Authentication Token"}` — la ruta no existe en API Gateway.
+
+        Un `403` también puede venir del WAF al superar el límite de peticiones por IP.
+      content:
+        text/plain:
+          schema: { type: string }
+          example: "Forbidden: missing Origin header"
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+          example:
+            message: Missing Authentication Token
+
+    TooManyRequests:
+      description: Se superó el throttling de API Gateway (10 rps, ráfaga 20).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+          example:
+            message: Too Many Requests
+
+    ServerError:
+      description: |
+        Error interno. La causa más habitual no es un fallo del código: **entre las 23:10 y
+        las 07:40 (hora de Ciudad de México) la base de datos está apagada** y todas las
+        peticiones fallan.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            errorCode: INTERNAL_ERROR
+            message: Unexpected error
+            path: /api/bible/chapter/1/1
+            timestamp: "2026-07-07T12:00:00Z"
+            fieldErrors: []
+
+  schemas:
+
+    ChapterResponse:
+      type: object
+      properties:
+        book: { type: string, description: Nombre del libro, example: "Génesis" }
+        chapter: { type: integer, example: 1 }
+        verses:
+          type: array
+          items: { $ref: '#/components/schemas/Verse' }
+
+    Verse:
+      type: object
+      properties:
+        verseNumber: { type: integer, example: 1 }
+        text: { type: string }
+        keywords:
+          type: array
+          items: { $ref: '#/components/schemas/Keyword' }
+
+    Keyword:
+      type: object
+      description: Palabra del versículo enlazada con su código Strong.
+      properties:
+        inflectionWord: { type: string, nullable: true, description: Forma flexionada en el idioma original }
+        translatedWord: { type: string, nullable: true }
+        transliteratedWord: { type: string, nullable: true }
+        strongNumber: { type: string, nullable: true, example: "H430" }
+        sourceTransliteration: { type: string, nullable: true }
+        sourceInflection: { type: string, nullable: true }
+        sourceMeaning: { type: string, nullable: true }
+        compoundTransliteration: { type: string, nullable: true }
+        compoundInflection: { type: string, nullable: true }
+        compoundMeaning: { type: string, nullable: true }
+
+    SearchResultResponse:
+      type: object
+      properties:
+        verses:
+          type: array
+          items: { $ref: '#/components/schemas/SearchResponse' }
+        returnedVerses:
+          type: integer
+          description: Número de versículos devueltos. Lo calcula el servidor a partir de la lista.
+        truncated:
+          type: boolean
+          description: "`true` si había más resultados de los devueltos por efecto de `limit`."
+
+    SearchResponse:
+      type: object
+      properties:
+        idBook: { type: integer, example: 1 }
+        chapter: { type: integer, example: 1 }
+        verseNumber: { type: integer, example: 1 }
+        text: { type: string }
+        keywords:
+          type: array
+          items: { $ref: '#/components/schemas/Keyword' }
+
+    SourceWordWithKeywordStatsResponse:
+      type: object
+      properties:
+        idWord: { type: string, example: "H430" }
+        transliteration: { type: string, nullable: true }
+        inflection: { type: string, nullable: true }
+        meaning: { type: string, nullable: true }
+        idParent: { type: string, nullable: true }
+        idParentSec: { type: string, nullable: true }
+        parentMeaning: { type: string, nullable: true }
+        parentSecMeaning: { type: string, nullable: true }
+        firstAppBook: { type: integer, nullable: true, description: Libro de la primera aparición }
+        firstAppChapter: { type: integer, nullable: true }
+        firstAppVerse: { type: integer, nullable: true }
+        keywordStats:
+          type: array
+          description: Conteo por palabra transliterada.
+          items: { $ref: '#/components/schemas/KeywordStats' }
+        keywordStatsTranslated:
+          type: array
+          description: Conteo por palabra traducida.
+          items: { $ref: '#/components/schemas/KeywordStats' }
+        compoundRelatedList:
+          type: array
+          description: Palabras compuestas relacionadas.
+          items: { $ref: '#/components/schemas/RelatedCompoundWord' }
+
+    KeywordStats:
+      type: object
+      properties:
+        transliteratedWord: { type: string, nullable: true }
+        translatedWord: { type: string, nullable: true }
+        count: { type: integer, nullable: true }
+
+    RelatedCompoundWord:
+      type: object
+      properties:
+        idWord: { type: string, nullable: true }
+        transliteratedWord: { type: string, nullable: true }
+        meaning: { type: string, nullable: true }
+
+    SourceWordResponse:
+      type: object
+      properties:
+        idWord: { type: string, example: "H430" }
+        transliteration: { type: string, nullable: true }
+        inflection: { type: string, nullable: true }
+        meaning: { type: string, nullable: true }
+        idParent: { type: string, nullable: true }
+        idParentSec: { type: string, nullable: true }
+        parentMeaning: { type: string, nullable: true }
+        parentSecMeaning: { type: string, nullable: true }
+        keywordsWithVerse:
+          type: array
+          items: { $ref: '#/components/schemas/KeywordWithVerse' }
+
+    KeywordWithVerse:
+      type: object
+      properties:
+        inflectionWord: { type: string, nullable: true }
+        translatedWord: { type: string, nullable: true }
+        transliteratedWord: { type: string, nullable: true }
+        idBook: { type: integer, nullable: true }
+        chapter: { type: integer, nullable: true }
+        verseNumber: { type: integer, nullable: true }
+        verseText: { type: string, nullable: true }
+        appearanceInVerse: { type: integer, nullable: true, description: Posición de la aparición dentro del versículo }
+
+    ErrorResponse:
+      type: object
+      description: Estructura de error del `@ControllerAdvice` global.
+      properties:
+        errorCode: { type: string, example: VALIDATION_ERROR }
+        message: { type: string }
+        path: { type: string }
+        timestamp: { type: string, format: date-time }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }

@@ -86,6 +86,18 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Base de datos en memoria, solo para que StreamLambdaHandlerTest pueda levantar
+             el contexto completo de Spring sin depender de una PostgreSQL real.
+             No sustituye a las pruebas contra PostgreSQL: la única consulta nativa del
+             proyecto (SearchRepository) usa `unaccent` y el operador `~*`, que H2 no
+             entiende. Como las consultas nativas no se validan al arrancar el contexto,
+             eso no impide la prueba, pero sí acota qué se puede probar con H2. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Lombok para simplificar modelos -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -107,6 +119,45 @@
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
+        </dependency>
+
+        <!-- ☁️ Adaptador para ejecutar la aplicación dentro de AWS Lambda.
+             Traduce los eventos de Lambda a la API de Servlet y se los entrega a Spring MVC,
+             de modo que los @RestController existentes no se tocan.
+
+             Se eligió frente a Lambda Web Adapter porque no levanta un servidor HTTP real ni
+             añade un salto de proxy, y porque es el camino que AWS documenta para SnapStart
+             sobre runtime gestionado con empaquetado ZIP (SnapStart no admite imágenes de
+             contenedor).
+
+             La dependencia está siempre presente para que StreamLambdaHandler compile; el
+             empaquetado para Lambda vive en el perfil `lambda` de más abajo, así que la
+             compilación por defecto sigue produciendo el fat jar que despliega ECS. -->
+        <dependency>
+            <groupId>com.amazonaws.serverless</groupId>
+            <artifactId>aws-serverless-java-container-springboot4</artifactId>
+            <version>3.0.0</version>
+        </dependency>
+
+        <!-- 📸 API de CRaC (Coordinated Restore at Checkpoint).
+             NO la usa código de este proyecto: su única función es ACTIVAR el soporte de
+             checkpoint/restore que Spring Boot trae de serie. Con esta dependencia en el
+             classpath, `HikariCheckpointRestoreLifecycle` (en spring-boot-jdbc) suspende y
+             vacía el pool de conexiones antes del snapshot de SnapStart y lo reanuda al
+             restaurar. Sin ella, el snapshot se llevaría dentro sockets muertos y la primera
+             consulta tras cada restauración fallaría.
+
+             El 2026-08-13 se llegó a escribir un org.crac.Resource propio para esto,
+             desconociendo que Spring ya lo hacía. No solo era redundante: corría después del
+             de Spring, pedía una conexión a un pool ya suspendido y se quedaba bloqueado
+             hasta agotar los 130 s de la fase de init. Se eliminó. Si algún día hace falta
+             un gancho propio, comprobar primero qué hace ya Spring.
+
+             Fuera de Lambda es inocua: sin implementación de CRaC por debajo, org.crac
+             instala un contexto que no hace nada. Versión gestionada por el BOM. -->
+        <dependency>
+            <groupId>org.crac</groupId>
+            <artifactId>crac</artifactId>
         </dependency>
 
 
@@ -139,7 +190,152 @@
                     </excludes>
                 </configuration>
             </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- StreamLambdaHandlerTest deja vivo el contexto de Spring que
+                         SpringBootLambdaContainerHandler guarda en un campo estático. NO es una
+                         fuga: en Lambda el proceso se reutiliza entre invocaciones y mantenerlo
+                         vivo es justamente el objetivo. El adaptador tampoco expone forma de
+                         cerrarlo.
+
+                         El efecto en el build es que la JVM de pruebas no termina sola y surefire
+                         espera 30 s antes de matarla. Se baja a 5 s: el resultado de las pruebas
+                         ya está decidido cuando esto ocurre. -->
+                    <forkedProcessExitTimeoutInSeconds>5</forkedProcessExitTimeoutInSeconds>
+                </configuration>
+            </plugin>
 		</plugins>
 	</build>
+
+    <profiles>
+        <!-- ==================================================================
+             Perfil `lambda` — empaquetado para AWS Lambda
+
+                 mvn package            -> fat jar de Spring Boot, el que despliega ECS
+                 mvn package -Plambda   -> target/bible-references-lambda.jar, para Lambda
+
+             Son dos artefactos del mismo código a propósito. Mientras dure la migración,
+             ECS tiene que poder desplegarse sin cambios: es la vía de vuelta si Lambda no
+             sale bien.
+
+             Hace falta `shade` y no vale el fat jar de Boot porque este coloca las clases
+             bajo BOOT-INF/, una disposición que el runtime Java de Lambda no sabe cargar.
+             ================================================================== -->
+        <profile>
+            <id>lambda</id>
+            <properties>
+                <!-- El ManifestResourceTransformer heredado del padre escribe
+                     Main-Class: ${start-class} en el manifiesto. Esa propiedad la suele
+                     rellenar el repackage de Boot, que en este perfil está desactivado, así
+                     que sin declararla aquí el manifiesto acabaría con el literal
+                     "${start-class}" sin resolver.
+                     Lambda no usa el Main-Class —entra por el handler—, pero un manifiesto
+                     con basura es justo el tipo de detalle que confunde al depurar. -->
+                <start-class>com.gdav.bible.bible_references.BibleReferencesApplication</start-class>
+            </properties>
+            <build>
+                <plugins>
+                    <!-- El repackage de Boot y shade se pisarían: en este perfil manda shade. -->
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <finalName>${project.artifactId}-lambda</finalName>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactSet>
+                                        <excludes>
+                                            <!-- El adaptador emula el contenedor de servlets, así
+                                                 que el servidor HTTP embebido sobra: nunca va a
+                                                 escuchar en un puerto. Al desaparecer sus clases, la
+                                                 autoconfiguración de spring-boot-tomcat queda
+                                                 desactivada sola por @ConditionalOnClass.
+
+                                                 SE EXCLUYEN UNO A UNO, NO CON `tomcat.embed:*`.
+                                                 Ese comodín se lleva también `tomcat-embed-el`, que
+                                                 no es un servidor: es la implementación de Jakarta EL
+                                                 que Hibernate Validator usa para interpolar los
+                                                 mensajes de las anotaciones de validación. Sin ella
+                                                 la aplicación no arranca:
+
+                                                   HV000183: Unable to initialize
+                                                   'jakarta.el.ExpressionFactory'
+
+                                                 y el fallo aparece al construir la SessionFactory de
+                                                 Hibernate, sin ninguna pista de que el problema sea
+                                                 el empaquetado. -->
+                                            <exclude>org.apache.tomcat.embed:tomcat-embed-core</exclude>
+                                            <exclude>org.apache.tomcat.embed:tomcat-embed-websocket</exclude>
+
+                                            <!-- DevTools NO debe viajar a producción: trae watchers
+                                                 de ficheros y un classloader de reinicio.
+                                                 El repackage de Spring Boot lo excluye por su cuenta,
+                                                 pero shade no conoce esa regla y lo empaquetaba
+                                                 (se colaron 154 clases en el primer intento). -->
+                                            <exclude>org.springframework.boot:spring-boot-devtools</exclude>
+                                        </excludes>
+                                    </artifactSet>
+
+                                    <!-- AQUÍ NO SE DECLARAN <transformers> A PROPÓSITO.
+                                         Fusionar los metadatos de Spring al reempaquetar es
+                                         imprescindible —varios jars aportan el MISMO fichero
+                                         (`AutoConfiguration.imports` viene de spring-boot-autoconfigure
+                                         y de spring-boot-cache, entre otros) y sin fusionarlos shade
+                                         conserva solo uno; el build sale verde y el fallo aparece al
+                                         arrancar, como un bean que falta—, pero de eso ya se encarga
+                                         `spring-boot-starter-parent`, que configura siete
+                                         transformers en el pluginManagement de este mismo plugin.
+                                         Su lista es además mejor que una escrita a mano: usa
+                                         PropertiesMergingResourceTransformer para `spring.factories`,
+                                         que fusiona claves en vez de concatenar ficheros.
+
+                                         Declarar aquí una lista propia NO la sustituye: como la
+                                         ejecución del padre comparte fase, goal e id, Maven fusiona
+                                         ambas listas POSICIÓN A POSICIÓN, mezclando transformers de
+                                         tipos distintos. El síntoma es
+                                         "Cannot find 'resource' in class ServicesResourceTransformer".
+                                         Si alguna vez hiciera falta añadir uno, hay que replicar la
+                                         lista completa del padre y marcarla combine.self="override". -->
+
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <!-- Los jars firmados hacen fallar el arranque con
+                                                     "Invalid signature file digest" al reempaquetarse. -->
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                                <exclude>module-info.class</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

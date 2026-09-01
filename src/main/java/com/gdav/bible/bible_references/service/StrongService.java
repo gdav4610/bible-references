@@ -34,9 +34,8 @@ public class StrongService implements IStrongService {
 
     @Override
     @Transactional(readOnly = true)
-    public SourceWordWithKeywordStatsResponse getStrongKeywordsGrouped(String strongCode, Boolean includeLXX) {
-        boolean includeLxx = includeLXX != null && includeLXX;
-        List<String> sources = includeLxx ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
+    public SourceWordWithKeywordStatsResponse getStrongKeywordsGrouped(String strongCode) {
+        List<String> sources = List.of("HEBREW AT", "TR");
         String keyUpper = strongCode.toUpperCase();
 
         String firstKey = strongCode;
@@ -81,9 +80,9 @@ public class StrongService implements IStrongService {
                     compound.getIdParentSec(),
                     compound.getParentMeaning(),
                     compound.getParentSecMeaning(),
-                    includeLxx ? compound.getFirstAppBookLxx() : compound.getFirstAppBook(),
-                    includeLxx ? compound.getFirstAppChapterLxx() : compound.getFirstAppChapter(),
-                    includeLxx ? compound.getFirstAppVerseLxx() : compound.getFirstAppVerse(),
+                    compound.getFirstAppBook(),
+                    compound.getFirstAppChapter(),
+                    compound.getFirstAppVerse(),
                     stats,
                     statsT,
                     KeywordMapper.toCompoundWordList(compoundRelatedList)
@@ -140,9 +139,9 @@ public class StrongService implements IStrongService {
                 entity.getIdParentSec(),
                 entity.getParentMeaning(),
                 entity.getParentSecMeaning(),
-                includeLxx ? entity.getFirstAppBookLxx() : entity.getFirstAppBook(),
-                includeLxx ? entity.getFirstAppChapterLxx() : entity.getFirstAppChapter(),
-                includeLxx ? entity.getFirstAppVerseLxx() : entity.getFirstAppVerse(),
+                entity.getFirstAppBook(),
+                entity.getFirstAppChapter(),
+                entity.getFirstAppVerse(),
                 stats,
                 statsT,
                 KeywordMapper.toCompoundWordList(compoundRelatedList)
@@ -160,9 +159,8 @@ public class StrongService implements IStrongService {
 
     @Override
     @Transactional(readOnly = true)
-    public SourceWordResponse getStrongDetail(String strongCode, String transliteratedWord, String translatedWord, Boolean includeLXX) {
-        boolean include = includeLXX != null && includeLXX;
-        List<String> sources = include ? List.of("HEBREW AT", "TR", "LXX") : List.of("HEBREW AT", "TR");
+    public SourceWordResponse getStrongDetail(String strongCode, String transliteratedWord, String translatedWord) {
+        List<String> sources = List.of("HEBREW AT", "TR");
         String keyUpper = strongCode.toUpperCase();
 
         if (strongCode.contains(" ")) {
