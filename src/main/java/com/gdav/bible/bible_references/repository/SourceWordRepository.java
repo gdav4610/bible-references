@@ -5,15 +5,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.cache.annotation.Cacheable;
 
 import java.util.List;
 
 @Repository
 public interface SourceWordRepository extends JpaRepository<SourceWordEntity, String> {
 
-    @Cacheable(value = "sourceWords", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
-            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT DISTINCT s FROM SourceWordEntity s " +
             "LEFT JOIN FETCH s.keywords k " +
             "LEFT JOIN FETCH k.verseEntity v " +
@@ -23,8 +20,6 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
     SourceWordEntity findByIdWordWithVerses(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
-    @Cacheable(value = "keywordCounts", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
-            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT k.transliteratedWord, COUNT(k) FROM SourceWordEntity s " +
             "LEFT JOIN s.keywords k " +
             "WHERE s.idWord = :idWord " +
@@ -33,8 +28,6 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
             "ORDER BY COUNT(k) DESC")
     List<Object[]> findKeywordCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
-    @Cacheable(value = "keywordTranslatedCounts", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
-            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT k.translatedWord, COUNT(k) FROM SourceWordEntity s " +
             "LEFT JOIN s.keywords k " +
             "WHERE s.idWord = :idWord " +
@@ -45,8 +38,6 @@ public interface SourceWordRepository extends JpaRepository<SourceWordEntity, St
     List<Object[]> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
-    @Cacheable(value = "keywordTransliteratedWord", key = "#root.methodName + '_' + #p0 + '_' + T(java.util.Objects).hash(#p1)",
-            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#p0)")
     @Query("SELECT DISTINCT s FROM SourceWordEntity s " +
             "LEFT JOIN FETCH s.keywords k " +
             "LEFT JOIN FETCH k.verseEntity v " +

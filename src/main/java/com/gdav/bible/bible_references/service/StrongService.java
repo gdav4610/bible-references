@@ -8,8 +8,7 @@ import com.gdav.bible.bible_references.repository.CompoundWordRepository;
 import com.gdav.bible.bible_references.repository.SourceWordRepository;
 import com.gdav.bible.bible_references.repository.entity.CompoundWordEntity;
 import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,16 +22,26 @@ public class StrongService implements IStrongService {
 
     private final SourceWordRepository sourceWordRepository;
     private final CompoundWordRepository compoundWordRepository;
-    private final OutboxRecorder outboxRecorder;
-    private static final Logger logger = LoggerFactory.getLogger(StrongService.class);
 
-    public StrongService(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository, OutboxRecorder outboxRecorder) {
+    public StrongService(SourceWordRepository sourceWordRepository, CompoundWordRepository compoundWordRepository) {
         this.sourceWordRepository = sourceWordRepository;
         this.compoundWordRepository = compoundWordRepository;
-        this.outboxRecorder = outboxRecorder;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Una sola caché en lugar de las cuatro que había repartidas por los repositorios. Un
+     * acierto se ahorra ahora <b>las tres o cuatro consultas</b> del método —no solo una cada
+     * vez— y todo el armado de la respuesta.
+     *
+     * <p>La clave se normaliza a mayúsculas porque el resto del método trabaja con
+     * {@code keyUpper}: sin eso, {@code h430} y {@code H430} ocuparían dos entradas con el
+     * mismo contenido.
+     */
     @Override
+    @Cacheable(value = "strongStats", key = "#strongCode.toUpperCase()",
+            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#strongCode.toUpperCase())")
     @Transactional(readOnly = true)
     public SourceWordWithKeywordStatsResponse getStrongKeywordsGrouped(String strongCode) {
         List<String> sources = List.of("HEBREW AT", "TR");
@@ -88,14 +97,6 @@ public class StrongService implements IStrongService {
                     KeywordMapper.toCompoundWordList(compoundRelatedList)
             );
 
-            // Outbox event
-            try {
-                String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}", keyUpper, sources);
-                outboxRecorder.record("CompoundKeywordQueried", payload);
-            } catch (Exception ex) {
-                logger.error("Failed to persist outbox event for StrongKeywordsGrouped (compound)", ex);
-            }
-
             return model;
         }
 
@@ -147,17 +148,27 @@ public class StrongService implements IStrongService {
                 KeywordMapper.toCompoundWordList(compoundRelatedList)
         );
 
-        try {
-            String payload = String.format("{\"strongCode\": \"%s\", \"sources\": %s}", keyUpper, sources);
-            outboxRecorder.record("KeywordQueried", payload);
-        } catch (Exception ex) {
-            logger.error("Failed to persist outbox event for StrongKeywordsGrouped (source)", ex);
-        }
-
         return model;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>La clave lleva los tres parámetros, y antes no.</b> La caché de repositorio que
+     * esto sustituye se indexaba por {@code idWord} y {@code transliteratedWord} pero
+     * <b>omitía {@code translatedWord}</b>, de modo que dos peticiones del mismo código con
+     * distinta palabra traducida colisionaban y la segunda recibía la respuesta de la
+     * primera. Cachear a la altura del caso de uso hace que la clave sea, por construcción,
+     * lo que distingue una petición de otra.
+     *
+     * <p>Solo afectaba a los códigos de la lista de {@code WordCacheCondition} —los únicos
+     * que se cacheaban— y solo a la caché en memoria de cada instancia: el controlador
+     * responde {@code no-store} en este endpoint, así que CloudFront nunca lo propagó.
+     */
     @Override
+    @Cacheable(value = "strongDetails",
+            key = "#strongCode.toUpperCase() + '_' + #transliteratedWord + '_' + #translatedWord",
+            condition = "@wordCacheCondition.shouldCacheWithJustOneParam(#strongCode.toUpperCase())")
     @Transactional(readOnly = true)
     public SourceWordResponse getStrongDetail(String strongCode, String transliteratedWord, String translatedWord) {
         List<String> sources = List.of("HEBREW AT", "TR");

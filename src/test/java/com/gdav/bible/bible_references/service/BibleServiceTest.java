@@ -27,9 +27,6 @@ class BibleServiceTest {
     private VerseRepository verseRepository;
 
     @Mock
-    private OutboxRecorder outboxRecorder;
-
-    @Mock
     private SearchRepository searchRepository;
 
     @InjectMocks
@@ -45,7 +42,7 @@ class BibleServiceTest {
     }
 
     @Test
-    void getChapter_returnsVersesAndSavesOutbox() {
+    void getChapter_returnsVerses() {
         VerseEntity v = new VerseEntity();
         // asignar id usando VerseId
         v.setId(new VerseId(1, 1, 1, 1));
@@ -57,8 +54,6 @@ class BibleServiceTest {
         assertNotNull(result);
         List<Verse> verses = result.verses();
         assertEquals(1, verses.size());
-
-        verify(outboxRecorder, times(1)).record(anyString(), anyString());
     }
 
     @Test

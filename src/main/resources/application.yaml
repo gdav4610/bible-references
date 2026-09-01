@@ -51,14 +51,24 @@ spring:
         connectTimeout: 2
   jpa:
     hibernate.ddl-auto: none
-    show-sql: true
+    # Apagado: cada consulta se formateaba y se escribía por stdout en el camino de la
+    # petición. En Lambda eso es CPU facturada, volumen en un log group que además no
+    # tiene retención configurada, y ruido que tapa las trazas que sí importan. Para
+    # depurar una consulta puntual, subir `logging.level.org.hibernate.SQL: DEBUG` en
+    # lugar de volver a activarlo de forma permanente.
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
         dialect: org.hibernate.dialect.PostgreSQLDialect
   cache:
     type: caffeine
-    cache-names: verses, sourceWords, compoundWords, keywordCounts, compoundWordCounts, keywordTranslatedCounts, compoundTranslatedCounts, keywordTransliteratedWord, compoundTransliteratedWord
+    # Tres cachés, una por caso de uso, en lugar de las nueve que había cuando cada
+    # consulta de repositorio tenía la suya. Lo que se guarda ahora es la respuesta ya
+    # construida —un record inmutable—, no entidades JPA: un acierto se ahorra también el
+    # mapeo, y en /strongs/{code}/stats se ahorra las tres o cuatro consultas del caso de
+    # uso completo en vez de una cada vez.
+    cache-names: chapters, strongStats, strongDetails
     caffeine:
       # expireAfterWrite=24h conserva el TTL que hazelcast.yaml aplicaba al mapa
       # `verses`. Aquí rige para todas las cachés: los datos de referencia no

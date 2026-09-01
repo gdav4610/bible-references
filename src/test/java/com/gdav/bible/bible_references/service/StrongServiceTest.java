@@ -10,8 +10,6 @@ import com.gdav.bible.bible_references.repository.entity.SourceWordEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,14 +28,8 @@ class StrongServiceTest {
     @Mock
     private CompoundWordRepository compoundWordRepository;
 
-    @Mock
-    private OutboxRecorder outboxRecorder;
-
     @InjectMocks
     private StrongService strongService;
-
-    @Captor
-    ArgumentCaptor<String> payloadCaptor;
 
     @BeforeEach
     void setUp() {
@@ -76,9 +68,6 @@ class StrongServiceTest {
         assertEquals(keyUpper, res.idWord());
         // el primer estadístico corresponde al transliterated counts (2)
 //        assertEquals(0, res.keywordStats().get(0).count());
-        // Persiste evento outbox
-        verify(outboxRecorder, times(1)).record(eq("CompoundKeywordQueried"), payloadCaptor.capture());
-        assertTrue(payloadCaptor.getValue().contains(keyUpper));
     }
 
     @Test

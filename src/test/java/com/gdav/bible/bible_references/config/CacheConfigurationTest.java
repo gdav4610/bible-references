@@ -31,12 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class CacheConfigurationTest {
 
-    /** Los mismos nombres declarados en spring.cache.cache-names. */
-    private static final String[] CACHES = {
-            "verses", "sourceWords", "compoundWords", "keywordCounts", "compoundWordCounts",
-            "keywordTranslatedCounts", "compoundTranslatedCounts", "keywordTransliteratedWord",
-            "compoundTransliteratedWord"
-    };
+    /** Los mismos nombres declarados en spring.cache.cache-names: uno por caso de uso. */
+    private static final String[] CACHES = {"chapters", "strongStats", "strongDetails"};
 
     /**
      * {@code CacheAutoConfiguration} es {@code @ConditionalOnBean(CacheAspectSupport.class)}
@@ -81,7 +77,7 @@ class CacheConfigurationTest {
     @Test
     void elSpecDeCaffeineEsValidoYLaCacheFunciona() {
         runner.run(context -> {
-            var cache = context.getBean(CacheManager.class).getCache("verses");
+            var cache = context.getBean(CacheManager.class).getCache("chapters");
             assertThat(cache).isNotNull();
             cache.put("clave", "valor");
             assertThat(cache.get("clave", String.class)).isEqualTo("valor");

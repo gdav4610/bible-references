@@ -54,7 +54,7 @@ public class VerseCacheCondition {
     public boolean shouldCacheVerse(Integer idBible, Integer idBook, Integer chapter, Integer idVerse) {
         for (Condition c : conditions) {
             if (c.matches(idBible, idBook, chapter, idVerse)) {
-                return true;º
+                return true;
             }
         }
         return false;

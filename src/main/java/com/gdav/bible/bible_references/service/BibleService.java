@@ -13,6 +13,7 @@ import com.gdav.bible.bible_references.repository.VerseRepository;
 import com.gdav.bible.bible_references.repository.entity.VerseEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,17 +24,37 @@ import java.util.stream.Collectors;
 public class BibleService implements IBibleService {
 
     private final VerseRepository repository;
-    private final OutboxRecorder outboxRecorder;
     private final SearchRepository searchRepository;
     private static final Logger logger = LoggerFactory.getLogger(BibleService.class);
 
-    public BibleService(VerseRepository repository, OutboxRecorder outboxRecorder, SearchRepository searchRepository) {
+    public BibleService(VerseRepository repository, SearchRepository searchRepository) {
         this.repository = repository;
-        this.outboxRecorder = outboxRecorder;
         this.searchRepository = searchRepository;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>La caché vive aquí y no en {@code VerseRepository}: lo que se guarda es la respuesta
+     * ya construida, no las entidades. Tres razones, por orden de importancia:
+     *
+     * <ol>
+     *   <li>Un acierto ya no paga el mapeo entidad → DTO, que antes se repetía en cada
+     *       petición aunque la consulta no llegara a la base de datos.</li>
+     *   <li>Lo cacheado deja de ser un grafo de entidades JPA desconectadas y mutables
+     *       compartido entre invocaciones, y pasa a ser un {@code record} inmutable.</li>
+     *   <li>La caché deja de depender de JPA: si algún día la consulta cambia de forma, la
+     *       clave sigue siendo la misma —los parámetros de la petición—.</li>
+     * </ol>
+     *
+     * <p>La clave incluye {@code idBible} y no {@code includeLxx} para que {@code null} y
+     * {@code false} —que designan la misma biblia— no ocupen dos entradas.
+     */
     @Override
+    @Cacheable(value = "chapters",
+            key = "T(com.gdav.bible.bible_references.config.VerseCacheCondition).idBibleFor(#includeLxx)"
+                    + " + '_' + #idBook + '_' + #chapter + '_' + #idVerse",
+            condition = "@verseCacheCondition.shouldCacheChapter(#idBook, #chapter, #idVerse, #includeLxx)")
     @Transactional(readOnly = true)
     public ChapterResponse getChapter(int idBook, int chapter, Integer idVerse, Boolean includeLxx) {
         String bookName = getBookName(idBook);
@@ -54,15 +75,6 @@ public class BibleService implements IBibleService {
                             KeywordMapper.toKeywordList(verseEntity.getKeywords())
                     )
             ).toList();
-        }
-
-        try {
-            String payload = String.format("{\"idBible\": %d, \"idBook\": %d, \"chapter\": %d, \"idVerse\": %s}",
-                    idBible, idBook, chapter, (idVerse != null ? idVerse.toString() : "null"));
-
-            outboxRecorder.record(idVerse == null ? "ChapterQueried" : "VerseQueried", payload);
-        } catch (Exception ex) {
-            logger.error("Failed to persist outbox event for ChapterQueried", ex);
         }
 
         return new ChapterResponse(bookName, chapter, versesList);
@@ -132,96 +144,42 @@ public class BibleService implements IBibleService {
         return Math.min(limit, MAX_SEARCH_LIMIT);
     }
 
-    // Copiar método getBookName del controller (puede moverse a util común)
-    private String getBookName(int id) {
-        Map<Integer, String> map = new HashMap();
-        map.putAll(Map.of(
-                1, "Génesis",
-                2, "Éxodo",
-                3, "Levítico",
-                4, "Números",
-                5, "Deuteronomio",
-                6, "Josué",
-                7, "Jueces",
-                8, "Rut",
-                9, "1 Samuel",
-                10, "2 Samuel"
-        ) );
-
-        map.putAll(Map.of(
-                11, "1 Reyes",
-                12, "2 Reyes",
-                13, "1 Crónicas",
-                14, "2 Crónicas",
-                15, "Esdras",
-                16, "Nehemías",
-                17, "Ester",
-                18, "Job",
-                19, "Salmos",
-                20, "Proverbios"
-        ) );
-
-        map.putAll(Map.of(
-                21, "Eclesiastés",
-                22, "Cantares",
-                23, "Isaías",
-                24, "Jeremías",
-                25, "Lamentaciones",
-                26, "Ezequiel",
-                27, "Daniel",
-                28, "Oseas",
-                29, "Joel",
-                30, "Amós"
-        ) );
-
-        map.putAll(Map.of(
-                31, "Abdías",
-                32, "Jonás",
-                33, "Miqueas",
-                34, "Nahum",
-                35, "Habacuc",
-                36, "Sofonías",
-                37, "Hageo",
-                38, "Zacarías",
-                39, "Malaquías",
-                40, "Mateo"
-        ) );
-
-        map.putAll(Map.of(
-                41, "Marcos",
-                42, "Lucas",
-                43, "Juan",
-                44, "Hechos",
-                45, "Romanos",
-                46, "1 Corintios",
-                47, "2 Corintios",
-                48, "Gálatas",
-                49, "Efesios",
-                50, "Filipenses"
-        ) );
-
-        map.putAll(Map.of(
-                51, "Colosenses",
-                52, "1 Tesalonicenses",
-                53, "2 Tesalonicenses",
-                54, "1 Timoteo",
-                55, "2 Timoteo",
-                56, "Tito",
-                57, "Filemón",
-                58, "Hebreos",
-                59, "Santiago",
-                60, "1 Pedro"
-        ) );
-
-        map.putAll(Map.of(
-                61, "2 Pedro",
-                62, "1 Juan",
-                63, "2 Juan",
-                64, "3 Juan",
-                65, "Judas",
-                66, "Apocalipsis"
-        ) );
-        return map.getOrDefault(id, "Desconocido");
+    /**
+     * Nombre del libro por su id.
+     *
+     * <p>El mapa es una constante, no una variable local: antes se construía uno nuevo de 66
+     * entradas —siete {@code Map.of} y siete {@code putAll}— en cada petición de capítulo.
+     * No depende de nada de la instancia, así que construirlo una vez al cargar la clase es
+     * además lo que interesa con SnapStart: ese coste queda dentro del snapshot.
+     */
+    private static String getBookName(int id) {
+        return BOOK_NAMES.getOrDefault(id, "Desconocido");
     }
+
+    private static final Map<Integer, String> BOOK_NAMES = Map.ofEntries(
+            Map.entry(1, "Génesis"), Map.entry(2, "Éxodo"), Map.entry(3, "Levítico"),
+            Map.entry(4, "Números"), Map.entry(5, "Deuteronomio"), Map.entry(6, "Josué"),
+            Map.entry(7, "Jueces"), Map.entry(8, "Rut"), Map.entry(9, "1 Samuel"),
+            Map.entry(10, "2 Samuel"), Map.entry(11, "1 Reyes"), Map.entry(12, "2 Reyes"),
+            Map.entry(13, "1 Crónicas"), Map.entry(14, "2 Crónicas"), Map.entry(15, "Esdras"),
+            Map.entry(16, "Nehemías"), Map.entry(17, "Ester"), Map.entry(18, "Job"),
+            Map.entry(19, "Salmos"), Map.entry(20, "Proverbios"), Map.entry(21, "Eclesiastés"),
+            Map.entry(22, "Cantares"), Map.entry(23, "Isaías"), Map.entry(24, "Jeremías"),
+            Map.entry(25, "Lamentaciones"), Map.entry(26, "Ezequiel"), Map.entry(27, "Daniel"),
+            Map.entry(28, "Oseas"), Map.entry(29, "Joel"), Map.entry(30, "Amós"),
+            Map.entry(31, "Abdías"), Map.entry(32, "Jonás"), Map.entry(33, "Miqueas"),
+            Map.entry(34, "Nahum"), Map.entry(35, "Habacuc"), Map.entry(36, "Sofonías"),
+            Map.entry(37, "Hageo"), Map.entry(38, "Zacarías"), Map.entry(39, "Malaquías"),
+            Map.entry(40, "Mateo"), Map.entry(41, "Marcos"), Map.entry(42, "Lucas"),
+            Map.entry(43, "Juan"), Map.entry(44, "Hechos"), Map.entry(45, "Romanos"),
+            Map.entry(46, "1 Corintios"), Map.entry(47, "2 Corintios"), Map.entry(48, "Gálatas"),
+            Map.entry(49, "Efesios"), Map.entry(50, "Filipenses"), Map.entry(51, "Colosenses"),
+            Map.entry(52, "1 Tesalonicenses"), Map.entry(53, "2 Tesalonicenses"),
+            Map.entry(54, "1 Timoteo"), Map.entry(55, "2 Timoteo"), Map.entry(56, "Tito"),
+            Map.entry(57, "Filemón"), Map.entry(58, "Hebreos"), Map.entry(59, "Santiago"),
+            Map.entry(60, "1 Pedro"), Map.entry(61, "2 Pedro"), Map.entry(62, "1 Juan"),
+            Map.entry(63, "2 Juan"), Map.entry(64, "3 Juan"), Map.entry(65, "Judas"),
+            Map.entry(66, "Apocalipsis"));
+
 }
 

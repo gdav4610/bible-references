@@ -24,6 +24,17 @@ public interface SearchRepository extends JpaRepository<VerseEntity, VerseId> {
      * {@code bible_word_references} es la parte cara, y así solo se hace sobre los
      * versículos que se van a devolver.
      *
+     * <p><b>{@code public.f_unaccent} no es un capricho de nombre.</b> El índice GIN de
+     * trigramas que hace rápida esta búsqueda es un índice <i>de expresión</i>, y PostgreSQL
+     * solo lo usa si la consulta escribe la expresión exactamente igual que el índice.
+     * {@code unaccent()} no se puede indexar —es {@code STABLE}, porque depende de un
+     * diccionario—, así que el índice está creado sobre un envoltorio {@code IMMUTABLE}
+     * llamado {@code f_unaccent} y la consulta tiene que llamar a ese mismo envoltorio.
+     *
+     * <p><b>Esta consulta no funciona sin la función.</b> Antes de desplegar este código hay
+     * que crear {@code public.f_unaccent} y el índice en la base de datos; el procedimiento,
+     * la verificación y la reversión están en {@code docs/runbook-indice-trigram-search.md}.
+     *
      * @param maxVerses tope de versículos. Conviene pedir uno más de los que se quieren
      *                  mostrar: si vuelven {@code maxVerses}, es que había más, y eso permite
      *                  informar de que el resultado está truncado sin una segunda consulta
@@ -32,7 +43,7 @@ public interface SearchRepository extends JpaRepository<VerseEntity, VerseId> {
     @Query(value = "WITH encontrados AS ( " +
             "  SELECT verse.id_bible, verse.id_book, verse.chapter, verse.verse, verse.text " +
             "  FROM bible_schema.bible_verses AS verse " +
-            "  WHERE verse.id_bible = :id_bible AND public.unaccent(verse.text) ~* public.unaccent(:translatedWord) " +
+            "  WHERE verse.id_bible = :id_bible AND public.f_unaccent(verse.text) ~* public.f_unaccent(:translatedWord) " +
             "  ORDER BY verse.id_book ASC, verse.chapter ASC, verse.verse ASC " +
             "  LIMIT :maxVerses " +
             ") " +
