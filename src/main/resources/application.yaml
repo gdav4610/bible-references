@@ -22,6 +22,33 @@ spring:
     username: postgres
     password: admin
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Requisito de HikariCheckpointRestoreLifecycle, el gancho de CRaC que Spring Boot
+      # activa al encontrar org.crac en el classpath: sin esto, suspendPool() lanza
+      # excepción y el pool no se puede vaciar antes del snapshot de SnapStart.
+      # No cambia el comportamiento en ECS —suspender solo ocurre si alguien lo pide—,
+      # así que es seguro tenerlo activo en todos los entornos.
+      allow-pool-suspension: true
+      # Fallar rápido cuando la base de datos no está: el defecto son 30 s, y con la
+      # parada nocturna de RDS (23:10-07:40 CDMX) eso se traduce en que la petición se
+      # cuelga hasta que expira la integración de API Gateway y el visitante recibe un
+      # 504 tras medio minuto de espera. Observado en vivo el 2026-08-14 a las 23:16.
+      #
+      # 5 s, y no menos, por margen sobre el camino normal: la primera invocación tras
+      # una restauración de SnapStart tarda 2,4 s de mediana y hasta 3,7 s en el peor
+      # caso medido. Bajar a 3 s se acercaría demasiado a ese rango y convertiría un
+      # arranque en frío lento en un error. Establecer la conexión dentro de la VPC son
+      # decenas de milisegundos, así que 5 s sigue siendo 25-100x el coste real.
+      connection-timeout: 5000
+      data-source-properties:
+        # No basta con connection-timeout. Ése acota la espera por una conexión *del pool*;
+        # el que manda al abrir el socket es el del driver, y pgjdbc trae 10 s por defecto.
+        # Medido con RDS parada: la versión 9 (sin nada) tardaba 33,3 s y ni siquiera
+        # respondía —la ejecución expiraba—; con solo connection-timeout bajó a 17 s con un
+        # 500. Los 11 s de `SocketTimeoutException` en los logs eran el driver, no Hikari.
+        #
+        # En segundos, no milisegundos: es una propiedad de pgjdbc, no de Hikari.
+        connectTimeout: 2
   jpa:
     hibernate.ddl-auto: none
     show-sql: true
@@ -45,7 +72,13 @@ spring:
 # Dominio del frontend (CloudFront). Reemplazar por su dominio, por ejemplo: https://d123.cloudfront.net
 app:
   frontend:
-    origin: "https://escrituraclave.com"
+    origin: "https://escrituraclave.com,http://localhost:3000"
+  origin-verify:
+    # Secreto compartido con CloudFront (cabecera X-Origin-Verify). Vacío = filtro inactivo,
+    # que es lo correcto en local y en ECS: allí la comprobación la hace la regla del
+    # listener del ALB. Solo la función Lambda define ORIGIN_VERIFY_SECRET, porque API
+    # Gateway no sabe enrutar por cabecera y la comprobación tiene que hacerla la aplicación.
+    secret: ${ORIGIN_VERIFY_SECRET:}
 
 springdoc:
   api-docs:
@@ -66,3 +99,20 @@ management:
   endpoint:
     health:
       show-details: never
+      # Nombres y estado de cada indicador, sin sus detalles. Es lo que faltaba para
+      # poder diagnosticar un DOWN: hasta ahora el endpoint devolvía 503 a secas y
+      # saber qué indicador fallaba exigía desplegar una versión solo para mirarlo.
+      # No expone datos: `show-details: never` sigue ocultando el mapa de detalles
+      # —producto de base de datos, bytes libres—, y el endpoint es alcanzable desde
+      # fuera al estar exento de OriginVerifyFilter.
+      show-components: always
+  health:
+    diskspace:
+      # DiskSpaceHealthIndicator mide el directorio de trabajo, que en Lambda es
+      # /var/task: un montaje de SOLO LECTURA cuyo espacio utilizable es 0, por debajo
+      # del umbral de 10 MB. De ahí que el mismo código diera 503 en Lambda y 200 en
+      # ECS, donde el sistema de ficheros es escribible. No era una caída: era un
+      # indicador midiendo algo que en Lambda no significa nada.
+      # /tmp es el único directorio escribible de Lambda (512 MB) y existe también en
+      # el contenedor de ECS, así que el indicador vuelve a medir algo real en ambos.
+      path: /tmp
