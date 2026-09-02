@@ -439,34 +439,6 @@ camino de producción**. La configuración de orígenes permitidos sigue siendo 
 desarrollo local y como defensa en profundidad, pero no es lo que habilita el tráfico real;
 conviene no confundir una cosa con la otra al diagnosticar.
 
-Infraestructura y fuente de verdad
-----------------------------------
-**Verificar qué archivo despliega realmente el pipeline antes de editarlo.**
-El workflow de este proyecto ejecuta `aws ecs describe-task-definition > task-definition.json`
-antes de renderizar, de modo que **sobrescribe** el archivo versionado con lo que ya está
-registrado en AWS. Editar el archivo del repositorio no tiene ningún efecto: los cambios de
-CPU, memoria o health check hay que registrarlos como revisión nueva.
-
-Lo correcto es invertir esa relación —eliminar el paso de descarga y dejar que el render
-parta del archivo versionado— para que los cambios de infraestructura pasen por revisión de
-código. Mientras no se haga, todo cambio aplicado a mano debe quedar documentado con su
-procedimiento de reversión.
-
-Checklist para Pull Request
----------------------------
-- ¿El PR cumple con un contrato definido? (docs/tests)
-- ¿Los Request/Response del controller usan `record` salvo excepción justificada?
-- ¿Los servicios exponen interface y la implementación está en `XService`?
-- ¿El `@ControllerAdvice` cubre las nuevas excepciones introducidas?
-- ¿Added/updated tests? (unit + integration si aplica)
-- ¿No se añaden logs con datos sensibles? ¿Se respetan tamaños de página y límites por defecto?
-- Si el PR toca el `Dockerfile` o el health check: ¿se verificó que las herramientas que invoca existen en la imagen resultante?
-- Si el PR toca el arranque de la aplicación: ¿sigue el `startPeriod` por encima del tiempo real medido?
-- Si el PR toca `task-definition.json`: ¿se registró además la revisión en AWS? (el pipeline sobrescribe ese archivo)
-- ¿Mensajes de commit claros y atómicos? Ejemplos:
-  - feat(strong-controller): add stats endpoint
-  - fix(search-service): handle null query
-  - test(keyword-mapper): add unit tests for edge cases
 
 Recomendaciones finales
 -----------------------

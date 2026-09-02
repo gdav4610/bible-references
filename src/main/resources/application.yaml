@@ -82,7 +82,7 @@ spring:
 # Dominio del frontend (CloudFront). Reemplazar por su dominio, por ejemplo: https://d123.cloudfront.net
 app:
   frontend:
-    origin: "https://escrituraclave.com,http://localhost:3000"
+    origin: "https://escrituraclave.com,https://www.escrituraclave.com,http://localhost:3000"
   origin-verify:
     # Secreto compartido con CloudFront (cabecera X-Origin-Verify). Vacío = filtro inactivo,
     # que es lo correcto en local y en ECS: allí la comprobación la hace la regla del
