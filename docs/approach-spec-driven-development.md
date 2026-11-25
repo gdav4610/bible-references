@@ -102,6 +102,100 @@ Toda clase de servicio debe exponer una interface pública e implementarse en un
   ```
 - No crear una interface cuando el servicio es puramente infraestructural y sin lógica de negocio (ej. `EmailSenderService` que solo delega a un cliente externo); en ese caso, una clase concreta anotada con `@Service` es suficiente.
 
+Principios de diseño (SOLID con proporción)
+-------------------------------------------
+Estas reglas fijan cuánta estructura se exige y cuánta se rechaza deliberadamente. 
+
+**1. La dependencia va en un solo sentido: `controller` → `service` → `repository`.**
+- Ninguna clase de `service` ni de `model` importa de `config`. La configuración puede
+  depender del dominio; el dominio nunca depende de la configuración.
+- Si una regla de negocio hace falta en `config` (por ejemplo, para decidir si una respuesta
+  es cacheable), extraerla a un tipo de `model` del que dependan **ambos**, servicio y clase
+  de configuración. Suelen ser unas pocas líneas.
+- No esquivar la regla referenciando la clase por nombre completo dentro de una expresión
+  SpEL (`T(com.gdav...)`): la dependencia sigue existiendo y encima el compilador deja de
+  verla, con lo que un renombrado la rompe en tiempo de ejecución.
+
+**2. Una clase, una razón para cambiar.**
+- El criterio no es el tamaño sino el motivo del cambio. Señal de que hay dos responsabilidades juntas: dos consumidores sin relación entre sí
+  dependen de métodos distintos y disjuntos de la misma clase.
+
+**3. Interfaces donde compran algo, no por defecto.**
+- Obligatoria en `@Service` con lógica de negocio (ver *Interfaces en la capa Service*).
+- No crear interface para `@Repository`, mappers, filtros ni clases de `config` mientras no
+  exista una segunda implementación real. Una interface con una sola implementación y sin
+  perspectiva de tener otra no desacopla nada: solo duplica la firma en dos ficheros.
+- La inversión de dependencias que sí se exige es la de la regla 1 —el sentido de los
+  imports—, no multiplicar interfaces.
+
+**4. Los tipos de persistencia no cruzan hacia arriba.**
+- Un `@Repository` devuelve entidades, proyecciones (interface o `record`) o DTOs. Nunca
+  `Object[]`, `Map<String, Object>` ni `Tuple`. Un `((Number) r[1]).intValue()` en la capa de
+  service es la prueba de que la consulta devolvió el tipo equivocado.
+- Para una consulta nativa con varias columnas, declarar una proyección con nombres en
+  `repository` y devolverla; el casting y el orden de las columnas se quedan en esa capa.
+- Lo que se cachea y lo que se devuelve al controller son `record` de respuesta, no entidades
+  JPA: una entidad en la caché arrastra su estado de persistencia y su carga perezosa fuera
+  de la transacción que la creó.
+
+**5. `model` compila sin Spring.**
+- Los tipos de `model` no llevan anotaciones de Spring ni de JPA. Las de JPA viven en
+  `repository/entity`; las de Spring, en `config`, `controller`, `service` y `repository`.
+- Es la versión barata de «el dominio no depende del framework»: cuesta un import menos, no
+  una capa más. Y cada bean que no se crea es tiempo de arranque que no se paga, que en esta
+  arquitectura es exactamente lo que queda congelado en el snapshot.
+
+**6. Un `String` que se valida o se descompone en más de dos sitios es un tipo.**
+- Cuando el mismo texto se normaliza (`toUpperCase()`), se comprueba (`contains(" ")`) o se
+  parte (`split(" ")`) en varios métodos, ahí hay un concepto del dominio disfrazado de
+  cadena. Extraerlo a un `record` de `model` con factoría estática `of(...)`, validación en
+  la construcción y accesores con el vocabulario del dominio.
+- El value object no depende de repositorios: se prueba con tests unitarios sin base de
+  datos, que es justo la parte que hoy solo se prueba a través de ella.
+- Ejemplo:
+  ```java
+  public record StrongCode(String first, String second) {
+      public static StrongCode of(String raw) { ... }   // normaliza y valida
+      public boolean isCompound() { ... }
+      public StrongCode reversed() { ... }
+  }
+  ```
+
+**7. Las interfaces de servicio se segregan por agregado, no por capa.**
+- Una interface por área del dominio (`IBibleService`, `IStrongService`). Prohibido el
+  `IApiService` que agrupa todos los casos de uso porque «todos son de la capa de servicio».
+- Criterio para dividir: dos controllers (o dos consumidores cualesquiera) usan subconjuntos
+  disjuntos de los métodos.
+- Un método auxiliar con un solo llamador y que no es un caso de uso no pertenece a la
+  interface: se queda `private` en la implementación.
+
+**8. Una implementación no puede endurecer el contrato de su interface.**
+- No lanzar excepciones fuera de las declaradas con `@throws` en la interface: envolver en la
+  excepción de dominio correspondiente (ver *Validación y manejo de errores*).
+- No exigir precondiciones adicionales ni devolver menos de lo prometido: si el contrato
+  admite un parámetro opcional, la implementación lo admite.
+- El `@ControllerAdvice` depende de la jerarquía `AppException`, nunca de una implementación
+  concreta; así el mapeo a HTTP sigue siendo válido al sustituirla.
+
+**Criterio transversal.** Si probar una regla de negocio obliga a levantar Spring o la base de
+datos, la regla está en el sitio equivocado. Es la comprobación práctica de las reglas 1, 4 y
+6, y evita discutir de arquitectura en abstracto.
+
+**Lo que no se adopta:**
+
+| Tentación | Por qué no, en este proyecto |
+|---|---|
+| Puertos y adaptadores, casos de uso, dominio sin framework | Sin escrituras ni invariantes que proteger, mantener dos jerarquías paralelas sincronizadas se paga en cada cambio y no compra nada |
+| Duplicar `model` en DTO de HTTP y modelo de dominio | Los `record` actuales sirven a las dos cosas; con un solo consumidor, separarlos es impuesto puro |
+| Un módulo Maven por capa | Multiplica el tiempo de build y el artefacto sale igual |
+| Interfaces por todo | Ver regla 3 |
+
+**Cuándo reabrir la decisión:** aparece un segundo consumidor con necesidades distintas a las
+de la SPA, aparecen escrituras con invariantes de negocio, aparece un segundo almacén de
+datos, o pasa a haber más de una persona tocando el código a la vez. Mientras no ocurra
+ninguna, la forma actual —controlador fino, servicio con la lógica, repositorio con las
+consultas y `record` inmutables entre ellos— es la proporcionada.
+
 Validación y manejo de errores
 ------------------------------
 **Validación de entrada:**

@@ -16,11 +16,13 @@ public record SourceWordWithKeywordStatsResponse(
         Integer firstAppVerse,
         List<KeywordStats> keywordStats,
         List<KeywordStats> keywordStatsTranslated,
+        List<KeywordBookStats> keywordBookStats,
         List<RelatedCompoundWord> compoundRelatedList
 ) {
     public SourceWordWithKeywordStatsResponse {
         keywordStats = keywordStats == null ? List.of() : List.copyOf(keywordStats);
         keywordStatsTranslated = keywordStatsTranslated == null ? List.of() : List.copyOf(keywordStatsTranslated);
+        keywordBookStats = keywordBookStats == null ? List.of() : List.copyOf(keywordBookStats);
         compoundRelatedList = compoundRelatedList == null ? List.of() : List.copyOf(compoundRelatedList);
     }
 }

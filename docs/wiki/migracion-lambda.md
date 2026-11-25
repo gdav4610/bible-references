@@ -1599,6 +1599,31 @@ a uno.
 > de cubrirlo es una verificación contra el artefacto —comprobar clases clave dentro del
 > ZIP— o un despliegue de prueba.
 
+## Versión 17 — `StrongCode` y conteos con proyección (2026-10-20)
+
+| Cambio | Efecto |
+|---|---|
+| `model/StrongCode` sustituye los `contains(" ")` / `split(" ")` de `StrongService` | `"H430 "` daba **500** en `/stats` (`ArrayIndexOutOfBoundsException`) y **404 falso** en `/details`; ahora 200. Minúsculas y espacios dobles se normalizan; `%`, `_` o más de dos códigos dan 404 sin consultar |
+| Proyección `KeywordWordCount` en los cuatro conteos por palabra | Fuera `Object[]` y `((Number) r[1]).intValue()`; fuera el parámetro `reversedStrongCode`, que ningún query usaba |
+| `keywordStats` en la rama simple | Si la palabra más frecuente era nula se vaciaba la lista entera; ahora sale como `""`, igual que en los compuestos |
+
+Mismo procedimiento que la 8, con la comprobación del JAR. Antes de mover el alias se invocó la
+17 directamente contra `/actuator/health`: `UP`, con `db`. Después se invalidó
+`/api/strongs/*` en CloudFront.
+
+**Cómo distinguir versiones desde fuera.** Dos técnicas que sirvieron aquí:
+
+- **Saltarse la caché del CDN con minúsculas.** `h430` es otra ruta y otra clave de CloudFront,
+  y no está en `WordCacheCondition`, así que el origen responde `no-store`: llega siempre a la
+  Lambda. Un `?query` no sirve, porque la clave no lleva query strings.
+- **Marcar con una petición que cambia de estado sin provocar un 5xx.** `/details` con
+  `"H430 "` daba 404 en la 16 y 200 en la 17. `/stats` con lo mismo distinguía igual, pero
+  en la 16 daba 500 y habría disparado `bible-references-api-5xx`.
+
+> **CloudFront solo admite el comodín al final de la ruta.** `/api/strongs/*/stats` no es una
+> ruta de invalidación válida; se invalida `/api/strongs/*`, que cubre lo mismo porque
+> `/details` va siempre con `no-store`.
+
 ## Vuelta atrás — coste según la fase
 
 La reversibilidad de esta migración no es una propiedad fija: cae de golpe en un punto
@@ -1651,15 +1676,21 @@ basta con mover el alias a la versión anterior. Surte efecto de inmediato, sin 
 propagación de CloudFront y sin tocar la distribución.
 
 ```bash
-aws lambda update-alias --function-name bible-references --name live --function-version 11
+aws lambda update-alias --function-name bible-references --name live --function-version 17
 ```
 
-Historial del alias, de más nueva a más vieja:
+Historial del alias, de más nueva a más vieja (actualizado el 2026-11-22):
 
 | Versión | Qué cambia respecto a la anterior | Existe |
 |---|---|---|
-| **12 — la que sirve hoy** | `diskSpace` mide `/tmp` y `show-components: always`: `/actuator/health` pasa de 503 a 200 | ✅ |
-| **11 — el único destino de vuelta atrás** | `connectTimeout: 2` del driver pgjdbc | ✅ |
+| **18 — la que sirve hoy** (2026-11-22) | `/stats` de un código del léxico sin keywords responde 200 con listas vacías, no 404 (H854); `keywordStatsTranslated` limitado a 25 en simples y compuestos | ✅ |
+| **17 — destino de vuelta atrás** | `StrongCode`: un código mal formado ya no da 500; conteos por palabra con proyección; `keywordStats` ya no se vacía con cabeza nula | ✅ |
+| 16 | `keywordBookStats` en `/stats`; filtro `idBook` en `/details` | ✅ |
+| 15 | `APP_FRONTEND_ORIGIN` admite `www.escrituraclave.com`; sin `localhost` en producción | ❌ borrada el 2026-10-20 |
+| 14 | `f_unaccent` + índice trigram en `/search`; caché a nivel de servicio; outbox fuera del camino de lectura | ❌ borrada el 2026-10-20 |
+| 13 | Rotación de `X-Origin-Verify`; código idéntico a la 12 | ❌ borrada el 2026-10-20 |
+| 12 | `diskSpace` mide `/tmp` y `show-components: always`: `/actuator/health` pasa de 503 a 200 | ❌ borrada el 2026-08-23 |
+| 11 | `connectTimeout: 2` del driver pgjdbc | ❌ borrada el 2026-08-23 |
 | 10 | `connection-timeout: 5000` de Hikari | ❌ borrada |
 | 9 | `includeLXX` retirado de `/search` y `/strongs`; caché en `StrongController` | ❌ borrada |
 | 8 | `no-store` explícito en `/api/bible/search` | ❌ borrada |
@@ -1707,6 +1738,22 @@ apunte a lo que se va a borrar.
 > que sí desaparece es la posibilidad de **inspeccionar** una versión vieja para comparar
 > comportamientos, que es como se comprobó que el 404 de `/details` no era una regresión
 > —invocando la 8 y la 9 por separado—. Esa técnica ya no está disponible hacia atrás.
+
+### Las versiones 13–15 se borraron el 2026-10-20
+
+Al publicar la 17, con el mismo criterio: **dejar la que sirve y la anterior**. Antes de
+borrar se comprobó que nada apuntaba a ellas: `live` es el único alias, en la 17 y sin
+`RoutingConfig`; sin concurrencia aprovisionada ni *event source mappings*; `bible-keep-warm`
+invoca el alias. Quedan `$LATEST`, la 16 y la 17.
+
+> **Corrección a lo dicho arriba sobre el archivo en S3.** El bucket tiene la regla de ciclo de
+> vida `expirar-artefactos-antiguos`, que **expira todo a los 30 días**, sin prefijo. El paso
+> del procedimiento de despliegue que copia el JAR anterior a `archivo/` produce una copia con
+> fecha de caducidad, no un archivo: el 2026-10-19 el bucket estaba vacío. Hoy contiene el JAR
+> de la 17 y `archivo/…-v16.jar`, y **ambos expiran el 2026-11-19**. La vuelta atrás real es
+> `update-alias`: cada versión publicada conserva su propia copia del código, y esa no caduca.
+
+**Próxima limpieza: al publicar la 19.**
 
 ### Qué mantenía barata la fase B *(histórico — la fase B terminó el 2026-08-15)*
 
@@ -1773,7 +1820,7 @@ Ninguno depende de Lambda; todos son independientes de esta migración:
 | 11 | Probar el handler con petición real | ✅ 5 pruebas de extremo a extremo |
 | 8 | SnapStart + pool de conexiones | ✅ lo resuelve Spring con `org.crac` |
 | 13 | Quitar el 403/404 → 200 con HTML | ✅ **aplicado en CloudFront** |
-| 12 | Crear la función Lambda | ✅ **versión 13 activa tras el alias `live`** (desde el 2026-08-23; código idéntico a la 12, solo cambia el secreto). ⚠️ **Ya no hay versión de vuelta atrás**: la 11 y la 12 se borraron el 2026-08-23, y de todos modos conservaban el `X-Origin-Verify` viejo. Solo quedan `$LATEST` y la 13 |
+| 12 | Crear la función Lambda | ✅ **versión 17 activa tras el alias `live`** (desde el 2026-10-20). Vuelta atrás: la 16. Quedan `$LATEST`, la 16 y la 17; la 11 y la 12 se borraron el 2026-08-23 y de la 13 a la 15 el 2026-10-20 |
 | 9 | Credenciales a variables de entorno | ✅ aplicado al crear la función |
 | — | Comprobar `X-Origin-Verify` en la aplicación | ✅ `OriginVerifyFilter`, verificado en producción |
 | 10 | CloudFront → API Gateway | ✅ **aplicado el 2026-08-14** |

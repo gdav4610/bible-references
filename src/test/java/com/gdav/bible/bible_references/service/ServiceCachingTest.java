@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -125,17 +126,36 @@ class ServiceCachingTest {
     void detalleDistingueLasPeticionesPorTranslatedWord() {
         runner.run(context -> {
             SourceWordRepository repo = context.getBean(SourceWordRepository.class);
-            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), eq("Dios"), anyList()))
+            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), eq("Dios"), anyList(), any()))
                     .thenReturn(palabra("H430", "dios"));
-            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), eq("jueces"), anyList()))
+            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), eq("jueces"), anyList(), any()))
                     .thenReturn(palabra("H430", "jueces"));
 
             IStrongService servicio = context.getBean(IStrongService.class);
-            var conDios = servicio.getStrongDetail("H430", null, "Dios");
-            var conJueces = servicio.getStrongDetail("H430", null, "jueces");
+            var conDios = servicio.getStrongDetail("H430", null, "Dios", null);
+            var conJueces = servicio.getStrongDetail("H430", null, "jueces", null);
 
             assertThat(conDios.meaning()).isEqualTo("dios");
             assertThat(conJueces.meaning()).isEqualTo("jueces");
+        });
+    }
+
+    /** El mismo código con y sin {@code idBook} no debe compartir entrada de caché. */
+    @Test
+    void detalleDistingueLasPeticionesPorIdBook() {
+        runner.run(context -> {
+            SourceWordRepository repo = context.getBean(SourceWordRepository.class);
+            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), any(), anyList(), isNull()))
+                    .thenReturn(palabra("H430", "todos"));
+            when(repo.findByIdWordAndTransliteratedWordWithVerses(eq("H430"), any(), any(), anyList(), eq(1)))
+                    .thenReturn(palabra("H430", "genesis"));
+
+            IStrongService servicio = context.getBean(IStrongService.class);
+            var sinLibro = servicio.getStrongDetail("H430", null, null, null);
+            var conLibro = servicio.getStrongDetail("H430", null, null, 1);
+
+            assertThat(sinLibro.meaning()).isEqualTo("todos");
+            assertThat(conLibro.meaning()).isEqualTo("genesis");
         });
     }
 

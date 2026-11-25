@@ -46,8 +46,8 @@ class StrongControllerTest {
     }
 
     private String cacheControlDeDetalle(String strongCode, String translit, String traducida) {
-        when(strongService.getStrongDetail(anyString(), any(), any())).thenReturn(null);
-        return controlador().getStrongDetail(strongCode, translit, traducida)
+        when(strongService.getStrongDetail(anyString(), any(), any(), any())).thenReturn(null);
+        return controlador().getStrongDetail(strongCode, translit, traducida, null)
                 .getHeaders().getFirst(HttpHeaders.CACHE_CONTROL);
     }
 

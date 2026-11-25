@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -74,6 +76,10 @@ public class StrongController {
                                       "keywordStatsTranslated": [
                                         { "transliteratedWord": null, "translatedWord": "Dios", "count": 2601 }
                                       ],
+                                      "keywordBookStats": [
+                                        { "idBook": 5, "bookName": "Deuteronomio", "count": 10 },
+                                        { "idBook": 7, "bookName": "Jueces", "count": 5 }
+                                      ],
                                       "compoundRelatedList": []
                                     }"""))),
             @ApiResponse(responseCode = "404", description = "Código Strong inexistente",
@@ -110,7 +116,8 @@ public class StrongController {
             summary = "Detalle de un código Strong con sus versículos",
             description = """
                     Devuelve la palabra fuente y la lista de apariciones (keywords con su versículo).
-                    Los filtros `transliteratedWord` y `translatedWord` son opcionales y acotan las apariciones.""")
+                    Los filtros `transliteratedWord`, `translatedWord` e `idBook` son opcionales y acotan las apariciones.
+                    Sin filtro de palabra se devuelven todas, hasta un máximo de 2.000; `truncated` indica si había más.""")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Detalle de la palabra fuente",
                     content = @Content(schema = @Schema(implementation = SourceWordResponse.class),
@@ -135,9 +142,11 @@ public class StrongController {
                                           "verseText": "En el principio creó Dios los cielos y la tierra.",
                                           "appearanceInVerse": 1
                                         }
-                                      ]
+                                      ],
+                                      "truncated": false
                                     }"""))),
-            @ApiResponse(responseCode = "404", description = "Código Strong inexistente",
+            @ApiResponse(responseCode = "400", description = "`idBook` fuera del rango 1–66"),
+            @ApiResponse(responseCode = "404", description = "Código Strong inexistente o sin apariciones en el libro pedido",
                     content = @Content(examples = @ExampleObject(value = """
                             {
                               "errorCode": "RESOURCE_NOT_FOUND",
@@ -154,11 +163,13 @@ public class StrongController {
             @Parameter(description = "Filtro opcional por palabra transliterada", example = "elohim")
             @RequestParam(name = "transliteratedWord", required = false) String transliteratedWord,
             @Parameter(description = "Filtro opcional por palabra traducida", example = "Dios")
-            @RequestParam(name = "translatedWord", required = false) String translatedWord) {
-        SourceWordResponse response = strongService.getStrongDetail(strongCode, transliteratedWord, translatedWord);
+            @RequestParam(name = "translatedWord", required = false) String translatedWord,
+            @Parameter(description = "Filtro opcional por libro, del 1 (Génesis) al 66 (Apocalipsis)", example = "1")
+            @RequestParam(name = "idBook", required = false) @Min(1) @Max(66) Integer idBook) {
+        SourceWordResponse response = strongService.getStrongDetail(strongCode, transliteratedWord, translatedWord, idBook);
 
         // `no-store` siempre, aunque el código esté en la lista de populares. A diferencia de
-        // /stats, aquí la respuesta depende de `transliteratedWord` y `translatedWord`, y la
+        // /stats, aquí la respuesta depende de `transliteratedWord`, `translatedWord` e `idBook`, y la
         // política de caché de CloudFront **no las lleva en la clave**: cachear esto haría que
         // una petición filtrada recibiera la respuesta sin filtrar, o la de otro filtro.
         //

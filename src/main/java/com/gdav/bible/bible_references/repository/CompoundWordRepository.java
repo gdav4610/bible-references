@@ -17,32 +17,48 @@ public interface CompoundWordRepository extends JpaRepository<CompoundWordEntity
     @Query("SELECT c FROM CompoundWordEntity c WHERE (c.idWord LIKE %:firstKey%  OR c.idWord LIKE %:secondKey%) AND c.idWord <> :idWord ")
     List<CompoundWordEntity> findLikeIdWord(@Param("firstKey") String firstKey,@Param("secondKey") String secondKey, @Param("idWord") String idWord);
 
-    @Query("SELECT k.transliteratedWord, COUNT(k) FROM CompoundWordEntity c " +
+    @Query("SELECT new com.gdav.bible.bible_references.repository.KeywordWordCount(k.transliteratedWord, COUNT(k)) " +
+            "FROM CompoundWordEntity c " +
             "LEFT JOIN KeywordEntity k ON c.idWord = k.strongNumber " +
             "WHERE (c.idWord = :idWord ) " +
             "AND k.source IN :sources " +
             "GROUP BY k.transliteratedWord " +
             "ORDER BY COUNT(k) DESC")
-    List<Object[]> findKeywordTransliteratedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources, @Param("reversedStrongCode") String reversedStrongCode);
+    List<KeywordWordCount> findKeywordTransliteratedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
-    @Query("SELECT k.translatedWord, COUNT(k) FROM CompoundWordEntity c " +
+    @Query("SELECT new com.gdav.bible.bible_references.repository.KeywordWordCount(k.translatedWord, COUNT(k)) " +
+            "FROM CompoundWordEntity c " +
             "LEFT JOIN KeywordEntity k ON c.idWord = k.strongNumber " +
             "WHERE (c.idWord = :idWord ) " +
             "AND k.source IN :sources " +
             "GROUP BY k.translatedWord " +
-            "ORDER BY COUNT(k) DESC")
-    List<Object[]> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources, @Param("reversedStrongCode") String reversedStrongCode);
+            "ORDER BY COUNT(k) DESC " +
+            "LIMIT 25")
+    List<KeywordWordCount> findKeywordTranslatedCountsByIdWord(@Param("idWord") String idWord, @Param("sources") List<String> sources);
+
+    /** Apariciones por libro. */
+    @Query("SELECT new com.gdav.bible.bible_references.repository.KeywordBookCount(k.idBook, COUNT(k)) " +
+            "FROM CompoundWordEntity c " +
+            "JOIN KeywordEntity k ON c.idWord = k.strongNumber " +
+            "WHERE c.idWord = :idWord " +
+            "AND k.source IN :sources " +
+            "AND k.idBook IS NOT NULL " +
+            "GROUP BY k.idBook " +
+            "ORDER BY COUNT(k) DESC, k.idBook ASC")
+    List<KeywordBookCount> findKeywordCountsByBook(@Param("idWord") String idWord, @Param("sources") List<String> sources);
 
 
     @Query("SELECT c FROM CompoundWordEntity c " +
             "LEFT JOIN FETCH c.keywords k " +
             "LEFT JOIN FETCH k.verseEntity v " +
             "WHERE c.idWord = :idWord " +
-            "AND (k.transliteratedWord = :transliteratedWord OR k.translatedWord = :translatedWord) " +
+            "AND ((:transliteratedWord IS NULL AND :translatedWord IS NULL) " +
+            "     OR k.transliteratedWord = :transliteratedWord OR k.translatedWord = :translatedWord) " +
             "AND k.source IN :sources " +
+            "AND (:idBook IS NULL OR k.idBook = :idBook) " +
             "ORDER BY v.id.idBook ASC, v.id.chapter ASC, v.id.verse ASC")
-    CompoundWordEntity findByIdWordAndTransliteratedWordWithVerses(@Param("idWord") String idWord, @Param("transliteratedWord") String transliteratedWord, @Param("translatedWord") String translatedWord, @Param("sources") List<String> sources);
+    CompoundWordEntity findByIdWordAndTransliteratedWordWithVerses(@Param("idWord") String idWord, @Param("transliteratedWord") String transliteratedWord, @Param("translatedWord") String translatedWord, @Param("sources") List<String> sources, @Param("idBook") Integer idBook);
 
 
 

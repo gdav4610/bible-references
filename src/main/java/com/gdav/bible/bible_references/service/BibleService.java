@@ -2,6 +2,7 @@ package com.gdav.bible.bible_references.service;
 
 import com.gdav.bible.bible_references.config.VerseCacheCondition;
 import com.gdav.bible.bible_references.mapper.KeywordMapper;
+import com.gdav.bible.bible_references.model.BibleBooks;
 import com.gdav.bible.bible_references.model.ChapterResponse;
 import com.gdav.bible.bible_references.model.Keyword;
 import com.gdav.bible.bible_references.model.SearchResponse;
@@ -57,7 +58,7 @@ public class BibleService implements IBibleService {
             condition = "@verseCacheCondition.shouldCacheChapter(#idBook, #chapter, #idVerse, #includeLxx)")
     @Transactional(readOnly = true)
     public ChapterResponse getChapter(int idBook, int chapter, Integer idVerse, Boolean includeLxx) {
-        String bookName = getBookName(idBook);
+        String bookName = BibleBooks.nameOf(idBook);
         // La traducción includeLXX -> idBible vive en VerseCacheCondition para que el
         // controlador pueda decidir la cacheabilidad con el mismo criterio, sin duplicarla.
         int idBible = VerseCacheCondition.idBibleFor(includeLxx);
@@ -144,42 +145,6 @@ public class BibleService implements IBibleService {
         return Math.min(limit, MAX_SEARCH_LIMIT);
     }
 
-    /**
-     * Nombre del libro por su id.
-     *
-     * <p>El mapa es una constante, no una variable local: antes se construía uno nuevo de 66
-     * entradas —siete {@code Map.of} y siete {@code putAll}— en cada petición de capítulo.
-     * No depende de nada de la instancia, así que construirlo una vez al cargar la clase es
-     * además lo que interesa con SnapStart: ese coste queda dentro del snapshot.
-     */
-    private static String getBookName(int id) {
-        return BOOK_NAMES.getOrDefault(id, "Desconocido");
-    }
-
-    private static final Map<Integer, String> BOOK_NAMES = Map.ofEntries(
-            Map.entry(1, "Génesis"), Map.entry(2, "Éxodo"), Map.entry(3, "Levítico"),
-            Map.entry(4, "Números"), Map.entry(5, "Deuteronomio"), Map.entry(6, "Josué"),
-            Map.entry(7, "Jueces"), Map.entry(8, "Rut"), Map.entry(9, "1 Samuel"),
-            Map.entry(10, "2 Samuel"), Map.entry(11, "1 Reyes"), Map.entry(12, "2 Reyes"),
-            Map.entry(13, "1 Crónicas"), Map.entry(14, "2 Crónicas"), Map.entry(15, "Esdras"),
-            Map.entry(16, "Nehemías"), Map.entry(17, "Ester"), Map.entry(18, "Job"),
-            Map.entry(19, "Salmos"), Map.entry(20, "Proverbios"), Map.entry(21, "Eclesiastés"),
-            Map.entry(22, "Cantares"), Map.entry(23, "Isaías"), Map.entry(24, "Jeremías"),
-            Map.entry(25, "Lamentaciones"), Map.entry(26, "Ezequiel"), Map.entry(27, "Daniel"),
-            Map.entry(28, "Oseas"), Map.entry(29, "Joel"), Map.entry(30, "Amós"),
-            Map.entry(31, "Abdías"), Map.entry(32, "Jonás"), Map.entry(33, "Miqueas"),
-            Map.entry(34, "Nahum"), Map.entry(35, "Habacuc"), Map.entry(36, "Sofonías"),
-            Map.entry(37, "Hageo"), Map.entry(38, "Zacarías"), Map.entry(39, "Malaquías"),
-            Map.entry(40, "Mateo"), Map.entry(41, "Marcos"), Map.entry(42, "Lucas"),
-            Map.entry(43, "Juan"), Map.entry(44, "Hechos"), Map.entry(45, "Romanos"),
-            Map.entry(46, "1 Corintios"), Map.entry(47, "2 Corintios"), Map.entry(48, "Gálatas"),
-            Map.entry(49, "Efesios"), Map.entry(50, "Filipenses"), Map.entry(51, "Colosenses"),
-            Map.entry(52, "1 Tesalonicenses"), Map.entry(53, "2 Tesalonicenses"),
-            Map.entry(54, "1 Timoteo"), Map.entry(55, "2 Timoteo"), Map.entry(56, "Tito"),
-            Map.entry(57, "Filemón"), Map.entry(58, "Hebreos"), Map.entry(59, "Santiago"),
-            Map.entry(60, "1 Pedro"), Map.entry(61, "2 Pedro"), Map.entry(62, "1 Juan"),
-            Map.entry(63, "2 Juan"), Map.entry(64, "3 Juan"), Map.entry(65, "Judas"),
-            Map.entry(66, "Apocalipsis"));
 
 }
 

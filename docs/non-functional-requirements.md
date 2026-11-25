@@ -209,6 +209,7 @@ log de la aplicación— ya no hace falta.
 | Memoria | — | 2048 MB | Configuración de la función | ✔ |
 | Tamaño de respuesta | < 3 MB | **6 MB** | Invocación síncrona de Lambda | ✔ |
 | Versículos por búsqueda | 500 por defecto | **2.000** | `IBibleService.MAX_SEARCH_LIMIT`; ~1,4 KB/versículo ⇒ ~2,8 MB | ✔ |
+| Apariciones en `/strongs/{code}/details` | — | **2.000**, con `truncated` | `IStrongService.MAX_DETAIL_KEYWORDS`; ~330 B/aparición ⇒ ~0,7 MB | ✔ |
 | Conexiones a RDS | — | Techo efectivo = 12 entornos × pool | ✔ |
 | Filas en `bible_verses` | — | ~31.000 | ✔ |
 
@@ -249,7 +250,7 @@ la Lambda se factura igual que una petición legítima.
 | Caída de una zona | **Caída del servicio.** RDS es Single-AZ | ✔ |
 | RDS no alcanzable | 500 en ~5 s: `connection-timeout` de Hikari a 5 s y `connectTimeout` de pgjdbc a 2 s, puestos precisamente para no colgarse 30 s | ✔ |
 | Petición fuera de la ventana | 500 rápido, no 504 tras medio minuto | ✔ |
-| Despliegue defectuoso | `update-alias` a la versión 13 (existe desde hoy) | ✔ |
+| Despliegue defectuoso | `update-alias` a la versión 17 (sirve la 18 desde el 2026-11-22) | ✔ |
 | Pérdida de la función | Reconstrucción manual: **no hay infraestructura como código con estado adoptado** | ✔ |
 
 ---
@@ -318,7 +319,7 @@ cachearlos serviría la respuesta de una petición a otra: `/api/bible/search` y
 | Protección contra borrado | — | `DeletionProtection: true` | ✔ |
 | Cifrado en reposo | — | Activo | ✔ |
 | Última restauración probada | — | **Ninguna** | ✖ |
-| Copia del artefacto desplegado | — | `s3://…/archivo/bible-references-lambda-v13.jar` | ✔ |
+| Copia del artefacto desplegado | — | `bible-references-lambda.jar` (v17) y `archivo/…-v16.jar`, **pero la regla `expirar-artefactos-antiguos` borra todo el bucket a los 30 días**: sin despliegue antes del 2026-11-19, no queda ninguno. La copia que perdura es la de cada versión publicada de Lambda | ✔ |
 
 > **El riesgo mayor no es la base de datos, es el código.** El artefacto que sirve producción
 > se construye desde el árbol de trabajo local; la base de datos tiene copias y protección
@@ -455,7 +456,7 @@ Sin requisitos aplicables: no se tratan datos personales ni regulados. ✔
 | Personas operando | 1 | Cualquier diseño que exija guardia es inviable | ✔ |
 | Guardia | Ninguna | Una caída nocturna se descubre por la mañana | ✔ |
 | Despliegue | **Manual**, desde el portátil | El pipeline de GitHub Actions despliega a ECS, que tiene `desiredCount 0`: no actualiza producción | ✔ |
-| Vuelta atrás | `update-alias` a la versión 13 | Segundos, y hoy sí existe versión anterior | ✔ |
+| Vuelta atrás | `update-alias` a la versión 17 | Segundos; dos escalones (17 y 16; 13–15 borradas el 2026-10-20) | ✔ |
 | Infraestructura como código | Terraform **sin estado adoptado** | Hoy es la vía de reconstrucción, no el seguro | ✔ |
 | Migraciones de esquema | **Ninguna herramienta.** `ddl-auto: none`, sin Flyway | Los cambios se aplican a mano, en orden, desde `docs/sql/` | ✔ |
 | Código en producción | **No versionado**: se construye del árbol local | Un accidente en la carpeta y no hay forma de reconstruirlo | ✔ |
@@ -510,7 +511,7 @@ Sin requisitos aplicables: no se tratan datos personales ni regulados. ✔
 | NFR-03 | La búsqueda usa índice | `Bitmap Index Scan` | `docs/sql/03-explain.sql` | ✔ Cumple (2026-09-01) |
 | NFR-04 | El origen no es alcanzable sin el secreto del borde | 403 | Petición directa a la URL de ejecución | ✔ Cumple |
 | NFR-05 | La base de datos no es alcanzable desde internet | Sin IP pública | `describe-db-instances` | ✔ Cumple |
-| NFR-06 | Existe versión anterior para vuelta atrás | ≥ 1 | `list-versions-by-function` | ✔ Cumple (13 y 14) |
+| NFR-06 | Existe versión anterior para vuelta atrás | ≥ 1 | `list-versions-by-function` | ✔ Cumple (16, 17 y 18, 2026-11-22) |
 | NFR-07 | Coste mensual bajo el umbral | < 12 USD | Alarma de facturación | ✔ Cumple (agosto) |
 | NFR-08 | Latencia p95 del backend | ▷ 2,5 s | `IntegrationLatency`: **2.467 ms** | ✔ Cumple (umbral fijado sobre lo real) |
 | NFR-08b | Latencia p95 **por endpoint** | ▷ Por definir | Access log del stage, desde el 2026-09-01 | ✔ Instrumentado; falta acordar umbral |
@@ -527,3 +528,5 @@ Sin requisitos aplicables: no se tratan datos personales ni regulados. ✔
 |---|---|---|
 | 2026-09-01 | Primera instancia de la plantilla, con el estado real verificado contra la API de AWS | Tener línea base antes de acordar objetivos |
 | 2026-09-01 | Percentiles reales de CloudWatch; ventana fijada; corregidos el p95 del backend (539 ms → 2.467 ms) y unos 404 inexistentes; access logging del stage activado; alarmas rehechas | Los primeros números mezclaban ventanas y una tabulación errónea inventó estados que no existían |
+| 2026-10-20 | Vuelta atrás y NFR-06 apuntan a la 16 (sirve la 17; 13–15 borradas); tope de apariciones del detalle Strong en §4; la copia en S3 del artefacto caduca a los 30 días | Las versiones citadas ya no existían. **Solo se tocaron esas filas**: el resto del documento sigue describiendo el estado del 2026-09-01 |
+| 2026-11-22 | Vuelta atrás y NFR-06 apuntan a la 17 (sirve la 18) | Publicada la 18. Solo se tocaron esas filas |

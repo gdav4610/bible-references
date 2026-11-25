@@ -185,6 +185,9 @@ paths:
         Devuelve la palabra fuente asociada al código Strong con el conteo de sus keywords
         (transliteradas y traducidas). Acepta códigos simples (`H430`) o compuestos separados
         por espacio (`H853 H430`).
+        Un código que está en el léxico pero no tiene apariciones etiquetadas responde 200 con
+        `keywordStats`, `keywordStatsTranslated` y `keywordBookStats` vacíos; 404 solo si el
+        código no existe en el léxico o está mal formado.
       parameters:
         - $ref: '#/components/parameters/ClientOrigin'
         - name: strongCode
@@ -195,7 +198,7 @@ paths:
           example: H430
       responses:
         '200':
-          description: Palabra fuente con estadísticas
+          description: Palabra fuente con estadísticas (listas vacías si no tiene apariciones)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SourceWordWithKeywordStatsResponse' }
@@ -215,6 +218,9 @@ paths:
                   - { transliteratedWord: "elohim", translatedWord: null, count: 2346 }
                 keywordStatsTranslated:
                   - { transliteratedWord: null, translatedWord: "Dios", count: 2601 }
+                keywordBookStats:
+                  - { idBook: 5, bookName: "Deuteronomio", count: 10 }
+                  - { idBook: 7, bookName: "Jueces", count: 5 }
                 compoundRelatedList: []
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -228,11 +234,8 @@ paths:
       summary: Detalle de un código Strong con sus versículos
       description: |
         Devuelve la palabra fuente y la lista de apariciones (keywords con su versículo).
-        Los filtros `transliteratedWord` y `translatedWord` son opcionales y acotan las apariciones.
-
-        > **Nota:** en producción este endpoint devuelve `404` para cualquier código. Es un
-        > comportamiento preexistente y conocido, anotado como hallazgo abierto en
-        > `docs/aws-architecture.md`; no es un fallo de la petición que envíes.
+        Los filtros `transliteratedWord`, `translatedWord` e `idBook` son opcionales y acotan las apariciones.
+        Sin filtro de palabra se devuelven todas, hasta un máximo de 2.000; `truncated` indica si había más.
       parameters:
         - $ref: '#/components/parameters/ClientOrigin'
         - name: strongCode
@@ -253,6 +256,12 @@ paths:
           description: Filtro opcional por palabra traducida
           schema: { type: string }
           example: Dios
+        - name: idBook
+          in: query
+          required: false
+          description: Filtro opcional por libro, del 1 (Génesis) al 66 (Apocalipsis)
+          schema: { type: integer, minimum: 1, maximum: 66 }
+          example: 1
       responses:
         '200':
           description: Detalle de la palabra fuente
@@ -277,6 +286,8 @@ paths:
                     verseNumber: 1
                     verseText: "En el principio creó Dios los cielos y la tierra."
                     appearanceInVerse: 1
+                truncated: false
+        '400': { $ref: '#/components/responses/ValidationError' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -451,6 +462,10 @@ components:
           type: array
           description: Conteo por palabra traducida.
           items: { $ref: '#/components/schemas/KeywordStats' }
+        keywordBookStats:
+          type: array
+          description: Conteo de apariciones agrupado por libro, por conteo descendente.
+          items: { $ref: '#/components/schemas/KeywordBookStats' }
         compoundRelatedList:
           type: array
           description: Palabras compuestas relacionadas.
@@ -462,6 +477,13 @@ components:
         transliteratedWord: { type: string, nullable: true }
         translatedWord: { type: string, nullable: true }
         count: { type: integer, nullable: true }
+
+    KeywordBookStats:
+      type: object
+      properties:
+        idBook: { type: integer, example: 5 }
+        bookName: { type: string, example: "Deuteronomio" }
+        count: { type: integer, example: 10 }
 
     RelatedCompoundWord:
       type: object
@@ -483,7 +505,11 @@ components:
         parentSecMeaning: { type: string, nullable: true }
         keywordsWithVerse:
           type: array
+          maxItems: 2000
           items: { $ref: '#/components/schemas/KeywordWithVerse' }
+        truncated:
+          type: boolean
+          description: "`true` si había más de 2.000 apariciones y la lista se recortó."
 
     KeywordWithVerse:
       type: object

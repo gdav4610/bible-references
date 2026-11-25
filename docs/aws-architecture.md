@@ -46,7 +46,7 @@ CloudFront  E1MTT1XP2UUMYU
            CachePolicy CachingDisabled     WAF bible-references-api-acl
                                              │
                                              ▼
-                                    Lambda bible-references : live → versión 13
+                                    Lambda bible-references : live → versión 17
                                        java25 · 2048 MB · timeout 30 s · x86_64
                                        SnapStart en versiones publicadas
                                        concurrencia reservada 12
